@@ -1,0 +1,25 @@
+# 本地密钥与环境配置
+API/.env
+API/.env.*
+!API/.env.example
+
+# 用户个人数据、生成结果与运行缓存
+history.json
+output/
+assets/input/
+assets/output/
+assets/uploads/
+data/canvases/
+data/conversations/
+data/media_previews/
+data/update_backups/
+data/asset_library.json
+data/projects.json
+data/prompt_libraries.json
+data/runninghub_workflows.json
+
+# 备份与临时文件
+backup-*/
+__pycache__/
+*.pyc
+*.log
