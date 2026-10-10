@@ -163,10 +163,10 @@ class ConnectionManager:
 manager = ConnectionManager()
 GLOBAL_LOOP = None
 APP_VERSION = "2026.06.03"
-GITHUB_REPO_URL = "https://github.com/hero8152/Infinite-Canvas"
-GITHUB_VERSION_URL = "https://raw.githubusercontent.com/hero8152/Infinite-Canvas/main/VERSION"
-GITHUB_TREE_URL = "https://api.github.com/repos/hero8152/Infinite-Canvas/git/trees/main?recursive=1"
-GITHUB_RAW_ROOT = "https://raw.githubusercontent.com/hero8152/Infinite-Canvas/main"
+GITHUB_REPO_URL = "https://github.com/wrwussssss-cell/chuangke-xunlianying-wuxianhuabu-2026.08"
+GITHUB_VERSION_URL = "https://raw.githubusercontent.com/wrwussssss-cell/chuangke-xunlianying-wuxianhuabu-2026.08/main/VERSION"
+GITHUB_TREE_URL = "https://api.github.com/repos/wrwussssss-cell/chuangke-xunlianying-wuxianhuabu-2026.08/git/trees/main?recursive=1"
+GITHUB_RAW_ROOT = "https://raw.githubusercontent.com/wrwussssss-cell/chuangke-xunlianying-wuxianhuabu-2026.08/main"
 GITHUB_UPDATE_NOTES_URL = GITHUB_RAW_ROOT + "/static/update-notes.json"
 MODELSCOPE_REPO_URL = "https://modelscope.ai/studios/daniel8152/Infinite-Canvas"
 MODELSCOPE_RAW_ROOT = "https://www.modelscope.ai/studios/daniel8152/Infinite-Canvas/raw/main"

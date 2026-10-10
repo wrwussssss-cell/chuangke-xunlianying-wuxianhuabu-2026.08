@@ -825,6 +825,13 @@ function isGptImageAutoSizeModel(model){
 function defaultApiImageResolution(model){
     return isGptImageAutoSizeModel(resolveImageModel(model)) ? '4k' : '1k';
 }
+function isVipGptProvider(providerId){
+    return String(providerId || '').trim().toLowerCase() === 'vip-gpt';
+}
+function apiResolutionOptions(providerId){
+    if(isVipGptProvider(providerId)) return '<option value="1k">1K</option>';
+    return '<option value="auto">自动</option><option value="1k">1K</option><option value="2k">2K</option><option value="4k">4K</option><option value="custom">'+tr('canvas.custom')+'</option>';
+}
 function normalizedImageQuality(value){
     const quality = String(value || 'auto').trim().toLowerCase();
     return ['low','medium','high'].includes(quality) ? quality : '';
@@ -1035,12 +1042,20 @@ function exceedsFourKStandard(width, height){
 }
 function normalizeApiNodeSizeChoice(node){
     if(!node) return;
+    if(isVipGptProvider(node.apiProvider)){
+        node.resolution = '1k';
+        node.customSize = '';
+        node.customWidth = '';
+        node.customHeight = '';
+        return;
+    }
     const allowAuto = isGptImageAutoSizeModel(resolveImageModel(node.model));
     if(allowAuto && node._apiResolutionUserSet !== true && (!node.resolution || node.resolution === '1k' || node.resolution === 'auto')) node.resolution = defaultApiImageResolution(node.model);
     else if(!node.resolution) node.resolution = defaultApiImageResolution(node.model);
     if(!allowAuto && node.resolution === 'auto') node.resolution = '1k';
 }
 async function generatorSizeForRun(gen, refs){
+    normalizeApiNodeSizeChoice(gen);
     if((gen.ratio || 'square') === 'source'){
         const ref = refs?.[0];
         if(ref?.url){
@@ -8317,11 +8332,7 @@ function renderGeneratorBody(node){
             </div>
             <div class="gen-settings-row api-size-row">
                 <select class="select-lite resolution compact-select" data-field="resolution">
-                    <option value="auto">自动</option>
-                    <option value="1k">1K</option>
-                    <option value="2k">2K</option>
-                    <option value="4k">4K</option>
-                    <option value="custom">${tr('canvas.custom')}</option>
+                    ${apiResolutionOptions(node.apiProvider)}
                 </select>
                 <select class="select-lite ratio compact-select" data-field="ratio">
                     <option value="square">1:1</option>
@@ -8464,6 +8475,7 @@ function renderGeneratorBody(node){
     };
     const syncSizeControls = () => {
         normalizeApiNodeSizeChoice(node);
+        resolutionSelect.innerHTML = apiResolutionOptions(node.apiProvider);
         const autoOption = resolutionSelect.querySelector('option[value="auto"]');
         if(autoOption) autoOption.disabled = !isGptImageAutoSizeModel(resolveImageModel(node.model));
         const squareOption = ratioSelect.querySelector('option[value="square"]');
