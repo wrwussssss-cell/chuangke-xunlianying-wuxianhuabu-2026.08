@@ -350,6 +350,8 @@ RUNNINGHUB_DEFAULT_BASE_URL = "https://www.runninghub.ai"
 RUNNINGHUB_OPENAPI_BASE_URL = "https://www.runninghub.ai/openapi/v2"
 RUNNINGHUB_MODEL_REGISTRY_URL = "https://raw.githubusercontent.com/HM-RunningHub/ComfyUI_RH_OpenAPI/main/models_registry.json"
 RUNNINGHUB_LLM_BASE_URL = "https://llm.runninghub.ai/v1"
+# 已下线且会返回 404 的历史工作流，不再下发给新安装的客户端。
+RETIRED_RUNNINGHUB_WORKFLOW_IDS = {"2058541134623891458", "2084608321469898754"}
 RUNNINGHUB_FILE_HOST_REWRITES = {
     "rh-images-1252422369.cos.ap-beijing.myqcloud.com": "rh-images.xiaoyaoyou.com",
 }
@@ -1014,6 +1016,8 @@ def normalize_runninghub_entry(raw, kind):
     if match:
         entry_id = match.group(2)
     if not entry_id:
+        return None
+    if kind == "workflow" and entry_id in RETIRED_RUNNINGHUB_WORKFLOW_IDS:
         return None
     title = re.sub(r"\s+", " ", str(raw.get("title") or raw.get("name") or "").strip())[:80]
     note = str(raw.get("note") or raw.get("description") or "").strip()[:500]
