@@ -1,6 +1,9 @@
 @echo off
 cd /d "%~dp0"
 
+set "APP_DIR=%~dp0"
+if exist "%~dp0创.ico" powershell -NoProfile -ExecutionPolicy Bypass -Command "$base=$env:APP_DIR; $icon=Join-Path $base '创.ico'; $shell=New-Object -ComObject WScript.Shell; Get-ChildItem -LiteralPath $base -Filter *.lnk -File -ErrorAction SilentlyContinue | ForEach-Object { try { $s=$shell.CreateShortcut($_.FullName); if($s.TargetPath -and ([IO.Path]::GetFileName($s.TargetPath) -ieq '启动服务.bat')) { $s.IconLocation=($icon+',0'); $s.Save() } } catch {} }"
+
 set "PYEXE=%~dp0python\python.exe"
 if not exist "%PYEXE%" set "PYEXE=python"
 

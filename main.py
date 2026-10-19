@@ -177,11 +177,41 @@ MODELSCOPE_VERSION_URL = MODELSCOPE_FILE_API_ROOT + "VERSION"
 MODELSCOPE_UPDATE_NOTES_URL = MODELSCOPE_FILE_API_ROOT + "static/update-notes.json"
 MODELSCOPE_TREE_URL = "https://www.modelscope.ai/api/v1/studio/daniel8152/Infinite-Canvas/repo/files?Revision=master&Recursive=true"
 
+def ensure_release_icon() -> bool:
+    """为旧发布包补回快捷方式所需的图标文件。"""
+    icon_path = os.path.join(BASE_DIR, "创.ico")
+    if os.path.isfile(icon_path) and os.path.getsize(icon_path) > 64:
+        return True
+    try:
+        url = f"{GITHUB_RAW_ROOT}/{urllib.parse.quote('创.ico')}"
+        response = requests.get(
+            url,
+            headers={"User-Agent": "Infinite-Canvas-Icon-Repair"},
+            timeout=15,
+            proxies=urllib.request.getproxies() or None,
+        )
+        data = response.content if response.ok else b""
+        if len(data) < 64 or not data.startswith(b"\x00\x00\x01\x00"):
+            return False
+        temp_path = f"{icon_path}.download_tmp"
+        with open(temp_path, "wb") as f:
+            f.write(data)
+        os.replace(temp_path, icon_path)
+        return True
+    except Exception:
+        return False
+
 @app.on_event("startup")
 async def startup_event():
     global GLOBAL_LOOP
     GLOBAL_LOOP = asyncio.get_running_loop()
     sync_static_html_versions()
+    # 旧发布包可能没有携带创.ico，启动时从本仓库补回并修正快捷方式路径。
+    try:
+        await asyncio.to_thread(ensure_release_icon)
+        await asyncio.to_thread(repair_bundled_shortcut_icons)
+    except Exception as exc:
+        print(f"修复快捷方式图标失败: {exc}")
     # 启动时整理资产库：给所有图片分组（含默认角色/场景）建好文件夹，并把根目录里的旧素材归整进去。
     try:
         await asyncio.to_thread(migrate_asset_library_into_dirs)
@@ -2035,7 +2065,42 @@ def update_allowed_file(path: str) -> bool:
     path = str(path or "").replace("\\", "/").lstrip("/")
     if not path or any(part in {"", ".", ".."} for part in path.split("/")):
         return False
-    return path in {"main.py", "VERSION"} or path.startswith("static/")
+    return path in {"main.py", "VERSION", "启动服务.bat", "创.ico", "创建桌面快捷方式.bat"} or path.startswith("static/")
+
+def repair_bundled_shortcut_icons() -> None:
+    """修复随发布包移动后失效的 Windows 快捷方式图标路径。"""
+    icon_path = os.path.join(BASE_DIR, "创.ico")
+    if os.name != "nt" or not os.path.isfile(icon_path):
+        return
+    script = r'''
+$base = $env:INFINITE_CANVAS_BASE
+$icon = $env:INFINITE_CANVAS_ICON
+if(-not $base -or -not $icon -or -not (Test-Path -LiteralPath $icon)){ exit 0 }
+$shell = New-Object -ComObject WScript.Shell
+Get-ChildItem -LiteralPath $base -Filter *.lnk -File -ErrorAction SilentlyContinue | ForEach-Object {
+    try {
+        $shortcut = $shell.CreateShortcut($_.FullName)
+        if($shortcut.TargetPath -and ([IO.Path]::GetFileName($shortcut.TargetPath) -ieq '启动服务.bat')) {
+            $shortcut.IconLocation = "$icon,0"
+            $shortcut.Save()
+        }
+    } catch {}
+}
+'''
+    env = os.environ.copy()
+    env["INFINITE_CANVAS_BASE"] = BASE_DIR
+    env["INFINITE_CANVAS_ICON"] = icon_path
+    try:
+        subprocess.run(
+            ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script],
+            env=env,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=15,
+            check=False,
+        )
+    except Exception:
+        pass
 
 # 缓存 GitHub Tree API 响应（含 ETag），减少 60 次/h 限流压力
 GITHUB_TREE_CACHE: Dict[str, Any] = {"etag": "", "data": None, "expires_at": 0.0}
@@ -2569,6 +2634,9 @@ def update_from_github(req: UpdateRequest = UpdateRequest()):
             if os.path.isdir(backup_static_dir):
                 shutil.copytree(backup_static_dir, static_dir)
             raise
+
+        # 图标文件更新后，修复发布包内快捷方式可能仍指向旧电脑的绝对路径。
+        repair_bundled_shortcut_icons()
 
         restart_scheduled = False
         if req.auto_restart and updated:
