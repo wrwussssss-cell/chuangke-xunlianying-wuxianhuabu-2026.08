@@ -17,6 +17,8 @@ data/asset_library.json
 data/projects.json
 data/prompt_libraries.json
 data/runninghub_workflows.json
+data/auth_users.json
+data/auth_secret.txt
 
 # 备份与临时文件
 backup-*/

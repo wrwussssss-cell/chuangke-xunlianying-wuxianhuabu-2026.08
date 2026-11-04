@@ -81,23 +81,97 @@ app.add_middleware(
 CANVAS_USER_CONTEXT = ContextVar("canvas_user_id", default="anonymous")
 CANVAS_USER_COOKIE = "infinite_canvas_user_id"
 
+AUTH_USER_CONTEXT = ContextVar("auth_user_id", default="")
+AUTH_COOKIE = "infinite_canvas_auth"
+AUTH_PUBLIC_PATHS = {"/", "/auth.html", "/api/auth/status", "/api/auth/register", "/api/auth/login", "/api/auth/logout", "/favicon.ico"}
+
+def secrets_token():
+    return uuid.uuid4().hex + uuid.uuid4().hex
+
+def _auth_file_paths():
+    data_dir = globals().get("DATA_DIR") or os.path.join(BASE_DIR, "data")
+    return os.path.join(data_dir, "auth_users.json"), os.path.join(data_dir, "auth_secret.txt")
+
+def _auth_secret():
+    _, secret_path = _auth_file_paths()
+    os.makedirs(os.path.dirname(secret_path), exist_ok=True)
+    if not os.path.exists(secret_path):
+        with open(secret_path, "w", encoding="utf-8") as f:
+            f.write(secrets_token())
+    with open(secret_path, "r", encoding="utf-8") as f:
+        return f.read().strip()
+
+def load_auth_users():
+    users_path, _ = _auth_file_paths()
+    try:
+        with open(users_path, "r", encoding="utf-8-sig") as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+def save_auth_users(users):
+    users_path, _ = _auth_file_paths()
+    os.makedirs(os.path.dirname(users_path), exist_ok=True)
+    temp_path = users_path + ".tmp"
+    with open(temp_path, "w", encoding="utf-8") as f:
+        json.dump(users, f, ensure_ascii=False, indent=2)
+    os.replace(temp_path, users_path)
+
+def auth_username(value):
+    return re.sub(r"[^a-zA-Z0-9_-]", "", str(value or "").strip())[:32]
+
+def password_hash(password, salt=None):
+    salt = salt or os.urandom(16).hex()
+    digest = hashlib.pbkdf2_hmac("sha256", str(password).encode("utf-8"), salt.encode("utf-8"), 180000).hex()
+    return salt, digest
+
+def verify_password(password, salt, expected):
+    _, digest = password_hash(password, salt)
+    return hmac.compare_digest(digest, str(expected or ""))
+
+def make_auth_token(username):
+    payload = f"{username}|{int(time.time()) + 60 * 60 * 24 * 14}"
+    encoded = base64.urlsafe_b64encode(payload.encode()).decode().rstrip("=")
+    signature = hmac.new(_auth_secret().encode(), encoded.encode(), hashlib.sha256).hexdigest()
+    return f"{encoded}.{signature}"
+
+def auth_user_from_token(token):
+    try:
+        encoded, signature = str(token or "").split(".", 1)
+        expected = hmac.new(_auth_secret().encode(), encoded.encode(), hashlib.sha256).hexdigest()
+        if not hmac.compare_digest(signature, expected):
+            return ""
+        padding = "=" * (-len(encoded) % 4)
+        username, expires = base64.urlsafe_b64decode((encoded + padding).encode()).decode().split("|", 1)
+        if int(expires) < int(time.time()) or username not in load_auth_users():
+            return ""
+        return username
+    except Exception:
+        return ""
+
+def auth_json_error(message, status_code=401):
+    return JSONResponse({"detail": message, "code": "auth_required"}, status_code=status_code)
+
 def normalize_canvas_user_id(value):
     text = re.sub(r"[^a-zA-Z0-9_-]", "-", str(value or "").strip())[:80].strip("-.")
     return text or "anonymous"
 
 @app.middleware("http")
 async def set_canvas_user_context(request: Request, call_next):
-    user_id = normalize_canvas_user_id(request.cookies.get(CANVAS_USER_COOKIE))
-    if user_id == "anonymous":
-        user_id = f"u-{uuid.uuid4().hex}"
-    token = CANVAS_USER_CONTEXT.set(user_id)
+    path = request.url.path.rstrip("/") or "/"
+    username = auth_user_from_token(request.cookies.get(AUTH_COOKIE, ""))
+    auth_token = AUTH_USER_CONTEXT.set(username)
+    canvas_token = CANVAS_USER_CONTEXT.set(normalize_canvas_user_id(username) if username else "anonymous")
     try:
-        response = await call_next(request)
-        if request.cookies.get(CANVAS_USER_COOKIE) != user_id:
-            response.set_cookie(CANVAS_USER_COOKIE, user_id, max_age=60 * 60 * 24 * 365 * 5, httponly=True, samesite="lax")
-        return response
+        if path not in AUTH_PUBLIC_PATHS and not path.startswith("/static/") and not username:
+            if path.startswith("/api/") or path.startswith("/output/") or path.startswith("/assets/"):
+                return auth_json_error("请先登录")
+            return Response(content=static_html_response("auth.html").body, media_type="text/html", status_code=401)
+        return await call_next(request)
     finally:
-        CANVAS_USER_CONTEXT.reset(token)
+        CANVAS_USER_CONTEXT.reset(canvas_token)
+        AUTH_USER_CONTEXT.reset(auth_token)
 
 # --- WebSocket 状态管理器 ---
 class ConnectionManager:
@@ -3805,7 +3879,7 @@ def load_canvas(canvas_id):
         path = legacy_canvas_path(canvas_id)
     if not os.path.exists(path):
         raise HTTPException(status_code=404, detail="画布不存在")
-    with open(path, 'r', encoding='utf-8') as f:
+    with open(path, 'r', encoding='utf-8-sig') as f:
         canvas = json.load(f)
     if canvas.get("deleted_at"):
         raise HTTPException(status_code=404, detail="画布已在回收站")
@@ -3817,7 +3891,7 @@ def load_canvas_any(canvas_id):
         path = legacy_canvas_path(canvas_id)
     if not os.path.exists(path):
         raise HTTPException(status_code=404, detail="画布不存在")
-    with open(path, 'r', encoding='utf-8') as f:
+    with open(path, 'r', encoding='utf-8-sig') as f:
         return json.load(f)
 
 CANVAS_COLORS = {"", "red", "orange", "amber", "green", "teal", "blue", "violet", "pink", "slate"}
@@ -11880,9 +11954,63 @@ async def build_chat_text_reply(payload, conversation):
 
 # --- 路由接口 ---
 
+@app.get("/api/auth/status")
+async def auth_status(request: Request):
+    users = load_auth_users()
+    username = auth_user_from_token(request.cookies.get(AUTH_COOKIE, ""))
+    return {"authenticated": bool(username), "username": username, "has_users": bool(users)}
+
+@app.post("/api/auth/register")
+async def auth_register(request: Request):
+    try:
+        payload = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="注册信息格式错误")
+    username = auth_username(payload.get("username"))
+    password = str(payload.get("password") or "")
+    confirm = str(payload.get("confirm_password") or payload.get("confirmPassword") or "")
+    if len(username) < 3:
+        raise HTTPException(status_code=400, detail="用户名至少 3 位，只能使用字母、数字、下划线或短横线")
+    if len(password) < 6:
+        raise HTTPException(status_code=400, detail="密码至少 6 位")
+    if password != confirm:
+        raise HTTPException(status_code=400, detail="两次输入的密码不一致")
+    users = load_auth_users()
+    if username in users:
+        raise HTTPException(status_code=409, detail="用户名已经存在")
+    salt, digest = password_hash(password)
+    users[username] = {"salt": salt, "password_hash": digest, "created_at": now_ms()}
+    save_auth_users(users)
+    response = JSONResponse({"ok": True, "username": username})
+    response.set_cookie(AUTH_COOKIE, make_auth_token(username), max_age=60 * 60 * 24 * 14, httponly=True, samesite="lax")
+    return response
+
+@app.post("/api/auth/login")
+async def auth_login(request: Request):
+    try:
+        payload = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="登录信息格式错误")
+    username = auth_username(payload.get("username"))
+    password = str(payload.get("password") or "")
+    user = load_auth_users().get(username)
+    if not user or not verify_password(password, user.get("salt"), user.get("password_hash")):
+        raise HTTPException(status_code=401, detail="用户名或密码错误")
+    response = JSONResponse({"ok": True, "username": username})
+    response.set_cookie(AUTH_COOKIE, make_auth_token(username), max_age=60 * 60 * 24 * 14, httponly=True, samesite="lax")
+    return response
+
+@app.post("/api/auth/logout")
+async def auth_logout():
+    response = JSONResponse({"ok": True})
+    response.delete_cookie(AUTH_COOKIE)
+    return response
+
 @app.get("/")
 async def index():
-    return static_html_response("index.html")
+    if AUTH_USER_CONTEXT.get():
+        return static_html_response("index.html")
+    return static_html_response("auth.html")
 
 @app.get("/api/view")
 def view_image(filename: str, type: str = "input", subfolder: str = ""):
