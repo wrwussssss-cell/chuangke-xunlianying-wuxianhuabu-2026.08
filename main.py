@@ -27,6 +27,7 @@ import shlex
 import functools
 import html
 import xml.etree.ElementTree as ET
+from contextvars import ContextVar
 from typing import List, Dict, Any, Optional, Tuple
 from threading import Lock, Thread
 import httpx
@@ -74,6 +75,29 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# 画布按浏览器隔离：外部版通过局域网共享时，每个浏览器获得独立的
+# canvas_user_id Cookie。新建、编辑和删除画布不会互相串数据。
+CANVAS_USER_CONTEXT = ContextVar("canvas_user_id", default="anonymous")
+CANVAS_USER_COOKIE = "infinite_canvas_user_id"
+
+def normalize_canvas_user_id(value):
+    text = re.sub(r"[^a-zA-Z0-9_-]", "-", str(value or "").strip())[:80].strip("-.")
+    return text or "anonymous"
+
+@app.middleware("http")
+async def set_canvas_user_context(request: Request, call_next):
+    user_id = normalize_canvas_user_id(request.cookies.get(CANVAS_USER_COOKIE))
+    if user_id == "anonymous":
+        user_id = f"u-{uuid.uuid4().hex}"
+    token = CANVAS_USER_CONTEXT.set(user_id)
+    try:
+        response = await call_next(request)
+        if request.cookies.get(CANVAS_USER_COOKIE) != user_id:
+            response.set_cookie(CANVAS_USER_COOKIE, user_id, max_age=60 * 60 * 24 * 365 * 5, httponly=True, samesite="lax")
+        return response
+    finally:
+        CANVAS_USER_CONTEXT.reset(token)
 
 # --- WebSocket 状态管理器 ---
 class ConnectionManager:
@@ -3639,10 +3663,42 @@ def list_conversations(user_id):
         })
     return sorted(records, key=lambda item: item["updated_at"], reverse=True)
 
-def canvas_path(canvas_id):
+def canvas_user_dir(user_id=None):
+    user = normalize_canvas_user_id(user_id or CANVAS_USER_CONTEXT.get())
+    path = os.path.join(CANVAS_DIR, "users", user)
+    os.makedirs(path, exist_ok=True)
+    return path
+
+def canvas_data_paths(include_legacy=True):
+    paths = [canvas_user_dir()]
+    if include_legacy:
+        paths.append(CANVAS_DIR)
+    return paths
+
+def iter_canvas_files(include_legacy=True):
+    seen = set()
+    for directory in canvas_data_paths(include_legacy=include_legacy):
+        try:
+            filenames = os.listdir(directory)
+        except OSError:
+            continue
+        for filename in filenames:
+            if not filename.endswith(".json"):
+                continue
+            canvas_id = os.path.splitext(filename)[0]
+            if canvas_id in seen:
+                continue
+            seen.add(canvas_id)
+            yield os.path.join(directory, filename)
+
+def canvas_path(canvas_id, user_id=None):
     cleaned = re.sub(r"[^a-zA-Z0-9_-]", "", canvas_id or "")
     if not cleaned:
         raise HTTPException(status_code=400, detail="无效的画布 ID")
+    return os.path.join(canvas_user_dir(user_id), f"{cleaned}.json")
+
+def legacy_canvas_path(canvas_id):
+    cleaned = re.sub(r"[^a-zA-Z0-9_-]", "", canvas_id or "")
     return os.path.join(CANVAS_DIR, f"{cleaned}.json")
 
 def save_canvas(canvas):
@@ -3746,6 +3802,8 @@ def new_canvas(title="未命名画布", icon="layers", kind="classic", project=N
 def load_canvas(canvas_id):
     path = canvas_path(canvas_id)
     if not os.path.exists(path):
+        path = legacy_canvas_path(canvas_id)
+    if not os.path.exists(path):
         raise HTTPException(status_code=404, detail="画布不存在")
     with open(path, 'r', encoding='utf-8') as f:
         canvas = json.load(f)
@@ -3755,6 +3813,8 @@ def load_canvas(canvas_id):
 
 def load_canvas_any(canvas_id):
     path = canvas_path(canvas_id)
+    if not os.path.exists(path):
+        path = legacy_canvas_path(canvas_id)
     if not os.path.exists(path):
         raise HTTPException(status_code=404, detail="画布不存在")
     with open(path, 'r', encoding='utf-8') as f:
@@ -3787,10 +3847,7 @@ def canvas_record(data):
 def cleanup_expired_canvas_trash():
     cutoff = now_ms() - CANVAS_TRASH_RETENTION_MS
     with CANVAS_LOCK:
-        for filename in os.listdir(CANVAS_DIR):
-            if not filename.endswith(".json"):
-                continue
-            path = os.path.join(CANVAS_DIR, filename)
+        for path in iter_canvas_files(include_legacy=True):
             try:
                 with open(path, 'r', encoding='utf-8') as f:
                     data = json.load(f)
@@ -3803,11 +3860,9 @@ def cleanup_expired_canvas_trash():
 def iter_canvas_records(include_deleted=False):
     cleanup_expired_canvas_trash()
     records = []
-    for filename in os.listdir(CANVAS_DIR):
-        if not filename.endswith(".json"):
-            continue
+    for path in iter_canvas_files(include_legacy=True):
         try:
-            with open(os.path.join(CANVAS_DIR, filename), 'r', encoding='utf-8') as f:
+            with open(path, 'r', encoding='utf-8') as f:
                 data = json.load(f)
         except Exception:
             continue
@@ -3941,11 +3996,9 @@ def canvas_assets_index():
     canvas_counts = {"all": 0, "smart": 0, "classic": 0}
     item_counts = {"all": 0, "smart": 0, "classic": 0}
     cleanup_expired_canvas_trash()
-    for filename in os.listdir(CANVAS_DIR):
-        if not filename.endswith(".json"):
-            continue
+    for path in iter_canvas_files(include_legacy=True):
         try:
-            with open(os.path.join(CANVAS_DIR, filename), "r", encoding="utf-8") as f:
+            with open(path, "r", encoding="utf-8") as f:
                 canvas = json.load(f)
         except Exception:
             continue
@@ -4805,6 +4858,12 @@ def effective_protocol(provider, model=""):
 def is_apimart_provider(provider):
     base_url = str((provider or {}).get("base_url") or "").lower()
     return provider_protocol(provider) == "apimart" or "apimart.ai" in base_url
+
+def is_vip_gpt_provider(provider):
+    """VIP-GPT exposes the OpenAI-compatible API, but not APIMart's upload route."""
+    base_url = str((provider or {}).get("base_url") or "").lower()
+    provider_id = str((provider or {}).get("id") or "").strip().lower()
+    return provider_id == "vip-gpt" or "vip-gpt.net" in base_url
 
 def detect_image_request_mode(base_url="", models=None):
     base = str(base_url or "").strip().lower()
@@ -8881,6 +8940,42 @@ async def openai_video_proxy_public_reference_url(ref) -> str:
         )
     raise HTTPException(status_code=400, detail=f"参考图不是公网 URL，无法传给上游：{text[:160]}")
 
+async def apimart_image_reference_urls(client, provider, reference_images):
+    """把画布本地参考图上传成中转站可访问的 URL。
+
+    APIMart/VIP-GPT 的 image_urls 需要可读取的公网 URL 或 asset:// 地址。
+    本地图片和 data URL 统一通过 APIMart 的图片上传接口转换，已有公网/asset
+    地址则原样保留。
+    """
+    urls = []
+    for ref in (reference_images or [])[:ONLINE_IMAGE_REFERENCE_MAX]:
+        value = str((ref or {}).get("url") or "").strip()
+        if not value:
+            continue
+        parsed = urllib.parse.urlsplit(value)
+        if parsed.scheme in {"http", "https"}:
+            urls.append(value)
+            continue
+        if value.startswith("asset://"):
+            urls.append(value)
+            continue
+        upload_value = value if value.startswith("data:image/") else value
+        if value.startswith(("/output/", "/assets/", "data:image/")):
+            uploaded_url = await upload_image_for_apimart(client, provider, upload_value)
+            if uploaded_url.startswith("ERR:"):
+                raise HTTPException(status_code=502, detail=uploaded_url[4:])
+            if valid_apimart_video_image_input(uploaded_url):
+                urls.append(uploaded_url)
+                continue
+            raise HTTPException(status_code=502, detail="参考图片上传中转站后没有返回可访问地址")
+        data_url = reference_to_data_url(ref, max_size=1536)
+        if data_url and data_url.startswith("data:image/"):
+            uploaded_url = await upload_image_for_apimart(client, provider, data_url)
+            if uploaded_url.startswith("ERR:"):
+                raise HTTPException(status_code=502, detail=uploaded_url[4:])
+            urls.append(uploaded_url)
+    return urls
+
 def openai_video_proxy_local_image_path(ref) -> str:
     raw = ref.get("url", "") if isinstance(ref, dict) else ref
     text = str(raw or "").strip()
@@ -11417,10 +11512,10 @@ async def generate_ai_image(prompt, size, quality, model, reference_images=None,
                 extra_body["image"] = [reference_to_data_url(ref, max_size=1536) for ref in image_refs[:ONLINE_IMAGE_REFERENCE_MAX]]
             body = {"model": model, "prompt": prompt, "size": size, "extra_body": extra_body}
             response = await client.post(gen_url, headers=api_headers(provider=provider, model=model), json=body)
-        elif is_apimart:
+        elif is_apimart and not (is_vip_gpt_provider(provider) and image_refs):
             apimart_size, resolution = apimart_size_resolution(size)
-            # APIMart 的 GPT-Image-2 图生图仍走 /images/generations，
-            # 通过 image_urls 传参考图，不使用 OpenAI multipart /images/edits。
+            # APIMart 原生接口使用 image_urls；VIP-GPT 有自己的 OpenAI 兼容
+            # 图像编辑接口，带图时会在下一个分支直接走 multipart /images/edits。
             body = {
                 "model": model,
                 "prompt": prompt,
@@ -11430,7 +11525,7 @@ async def generate_ai_image(prompt, size, quality, model, reference_images=None,
                 "official_fallback": False,
             }
             if image_refs:
-                body["image_urls"] = [reference_to_data_url(ref, max_size=1536) for ref in image_refs[:ONLINE_IMAGE_REFERENCE_MAX]]
+                body["image_urls"] = await apimart_image_reference_urls(client, provider, image_refs)
             response = await client.post(gen_url, headers=api_headers(provider=provider, model=model), json=body)
         elif is_gpt2 and not image_refs and not mask_refs:
             body = {"model": model, "prompt": prompt, "size": size}
