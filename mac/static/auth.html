@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>无限画布｜登录</title>
+  <style>
+    *{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;background:linear-gradient(135deg,#eef3fb,#f8fafc 55%,#e7edff);font-family:Inter,"Microsoft YaHei",sans-serif;color:#17233d}
+    .card{width:min(430px,calc(100% - 32px));padding:34px;border:1px solid #dbe4f2;border-radius:24px;background:#fff;box-shadow:0 24px 70px #293e661c}.brand{display:flex;gap:14px;align-items:center;margin-bottom:26px}.logo{width:48px;height:48px;border-radius:14px;display:grid;place-items:center;background:#315ff2;color:#fff;font-weight:800;font-size:25px}.brand h1{margin:0;font-size:25px}.brand p{margin:5px 0 0;color:#77849c;font-size:13px}.tabs{display:flex;padding:4px;border-radius:12px;background:#f1f4f9;margin-bottom:22px}.tabs button{flex:1;border:0;border-radius:9px;padding:10px;background:transparent;color:#71809a;font-size:15px;cursor:pointer}.tabs button.active{background:#fff;color:#1e3155;box-shadow:0 3px 10px #24375d14;font-weight:700}.field{margin:14px 0}.field label{display:block;margin-bottom:7px;font-size:13px;color:#5d6a82}.field input{width:100%;border:1px solid #d9e1ef;border-radius:11px;padding:13px 14px;font-size:15px;outline:none}.field input:focus{border-color:#4674f5;box-shadow:0 0 0 3px #4674f51a}.submit{width:100%;border:0;border-radius:12px;padding:14px;background:#1d2e4b;color:#fff;font-size:16px;font-weight:700;cursor:pointer;margin-top:10px}.hint{min-height:22px;margin:15px 0 0;color:#7b879b;font-size:13px;text-align:center}.hint.error{color:#d94b55}.hint.ok{color:#2e8b62}.note{margin-top:22px;padding-top:17px;border-top:1px solid #edf0f5;color:#8b96a8;font-size:12px;line-height:1.7;text-align:center}
+  </style>
+</head>
+<body>
+  <main class="card">
+    <div class="brand"><div class="logo">创</div><div><h1>无限画布</h1><p>个人账号登录后，画布和素材彼此隔离</p></div></div>
+    <div class="tabs"><button id="loginTab" class="active">登录</button><button id="registerTab">注册账号</button></div>
+    <form id="authForm">
+      <div class="field"><label>用户名</label><input id="username" autocomplete="username" placeholder="3-32 位字母、数字或下划线" required></div>
+      <div class="field"><label>密码</label><input id="password" type="password" autocomplete="current-password" placeholder="至少 6 位" required></div>
+      <div class="field" id="confirmField" hidden><label>确认密码</label><input id="confirmPassword" type="password" autocomplete="new-password" placeholder="再次输入密码"></div>
+      <button class="submit" id="submitButton" type="submit">登录并进入画布</button>
+    </form>
+    <div class="hint" id="hint"></div>
+    <div class="note">账号保存在运行这台电脑的本地数据目录中，不上传 GitHub。<br>请不要在公共电脑上保存自己的密码。</div>
+  </main>
+  <script>
+    let mode='login';
+    const $=id=>document.getElementById(id), hint=$('hint');
+    function setMode(next){mode=next; $('loginTab').classList.toggle('active',mode==='login');$('registerTab').classList.toggle('active',mode==='register');$('confirmField').hidden=mode!=='register';$('submitButton').textContent=mode==='login'?'登录并进入画布':'注册并进入画布';$('password').autocomplete=mode==='login'?'current-password':'new-password';hint.textContent='';hint.className='hint'}
+    $('loginTab').onclick=()=>setMode('login');$('registerTab').onclick=()=>setMode('register');
+    $('authForm').onsubmit=async e=>{e.preventDefault();hint.textContent='处理中…';hint.className='hint';const body={username:$('username').value.trim(),password:$('password').value};if(mode==='register')body.confirm_password=$('confirmPassword').value;try{const r=await fetch('/api/auth/'+mode,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});const data=await r.json();if(!r.ok)throw new Error(data.detail||'操作失败');hint.textContent='成功，正在进入画布…';hint.className='hint ok';location.href='/'}catch(err){hint.textContent=err.message;hint.className='hint error'}};
+  </script>
+</body>
+</html>

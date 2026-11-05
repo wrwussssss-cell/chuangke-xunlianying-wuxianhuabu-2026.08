@@ -25,3 +25,22 @@ backup-*/
 __pycache__/
 *.pyc
 *.log
+
+# Mac 发布包中的本地数据、密钥和系统文件
+mac/.DS_Store
+mac/**/.DS_Store
+mac/history.json
+mac/API/.env
+mac/API/.env.*
+!mac/API/.env.example
+mac/output/
+mac/assets/input/
+mac/assets/output/
+mac/assets/uploads/
+mac/data/canvases/
+mac/data/conversations/
+mac/data/media_previews/
+mac/data/update_backups/
+mac/data/auth_users.json
+mac/data/auth_secret.txt
+mac/__pycache__/

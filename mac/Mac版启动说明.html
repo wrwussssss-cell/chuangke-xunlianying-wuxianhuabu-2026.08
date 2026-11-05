@@ -1,0 +1,570 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light">
+<title>Mac 版启动说明 · 无限画布</title>
+<style>
+  :root{
+    --bg:#f5f5f7;
+    --card:#ffffff;
+    --ink:#1d1d1f;
+    --ink-2:#515154;
+    --ink-3:#86868b;
+    --line:rgba(0,0,0,.09);
+    --accent:#0071e3;
+    --accent-soft:#e8f2fd;
+    --warn:#ff9f0a;
+    --warn-soft:#fff5e5;
+    --danger:#ff3b30;
+    --danger-soft:#fdecea;
+    --ok:#34c759;
+    --ok-soft:#e9f8ee;
+    --radius:18px;
+    --shadow:0 1px 2px rgba(0,0,0,.04),0 12px 32px rgba(0,0,0,.06);
+  }
+  *{box-sizing:border-box}
+  html{-webkit-text-size-adjust:100%}
+  body{
+    margin:0;
+    padding:0 20px 72px;
+    background:
+      radial-gradient(1200px 600px at 50% -320px,#e6f0fb 0%,rgba(230,240,251,0) 70%),
+      var(--bg);
+    color:var(--ink);
+    font:16px/1.75 -apple-system,BlinkMacSystemFont,"PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+    -webkit-font-smoothing:antialiased;
+  }
+  .wrap{max-width:880px;margin:0 auto}
+
+  /* ---------- 头部 ---------- */
+  .hero{padding:56px 4px 28px;text-align:left}
+  .eyebrow{
+    display:inline-flex;align-items:center;gap:8px;
+    padding:5px 12px;border-radius:999px;
+    background:rgba(0,113,227,.09);color:var(--accent);
+    font-size:13px;font-weight:600;letter-spacing:.02em;
+  }
+  .eyebrow::before{content:"";width:7px;height:7px;border-radius:50%;background:var(--accent)}
+  h1{
+    margin:16px 0 10px;
+    font-size:clamp(30px,5vw,42px);
+    line-height:1.2;letter-spacing:-.02em;font-weight:700;
+  }
+  .sub{margin:0;color:var(--ink-2);font-size:17px;max-width:38em}
+  .hero-meta{display:flex;flex-wrap:wrap;gap:8px;margin-top:20px}
+  .hero-meta span{
+    font-size:13px;color:var(--ink-2);
+    background:#fff;border:1px solid var(--line);
+    padding:6px 12px;border-radius:999px;
+  }
+
+  /* ---------- 卡片 ---------- */
+  .card{
+    background:var(--card);
+    border:1px solid var(--line);
+    border-radius:var(--radius);
+    box-shadow:var(--shadow);
+    padding:26px 28px;
+    margin:20px 0;
+  }
+  h2{
+    margin:0 0 14px;
+    font-size:20px;line-height:1.35;letter-spacing:-.01em;font-weight:650;
+    display:flex;align-items:center;gap:10px;
+  }
+  h3{margin:26px 0 8px;font-size:17px;font-weight:650}
+  p{margin:10px 0}
+  ul,ol{margin:10px 0;padding-left:1.35em}
+  li{margin:6px 0}
+  code{
+    font:13.5px/1.5 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+    background:rgba(0,0,0,.055);
+    padding:.18em .45em;border-radius:6px;
+    word-break:break-all;
+  }
+  a{color:var(--accent);text-decoration:none}
+  a:hover{text-decoration:underline}
+  .muted{color:var(--ink-3);font-size:14px}
+
+  /* ---------- 快速结论 ---------- */
+  .quick{background:linear-gradient(180deg,#fff 0%,#fbfcfe 100%)}
+  .quick-list{counter-reset:q;list-style:none;padding:0;margin:8px 0 0}
+  .quick-list li{
+    counter-increment:q;
+    position:relative;padding:10px 0 10px 42px;
+    border-top:1px solid var(--line);
+    color:var(--ink-2);
+  }
+  .quick-list li:first-child{border-top:none}
+  .quick-list li::before{
+    content:counter(q);
+    position:absolute;left:0;top:10px;
+    width:26px;height:26px;border-radius:50%;
+    background:var(--accent-soft);color:var(--accent);
+    font-size:13px;font-weight:700;
+    display:flex;align-items:center;justify-content:center;
+  }
+  .quick-list b{color:var(--ink)}
+
+  /* ---------- 步骤 ---------- */
+  .step{
+    position:relative;
+    background:var(--card);
+    border:1px solid var(--line);
+    border-radius:var(--radius);
+    box-shadow:var(--shadow);
+    padding:24px 28px 26px;
+    margin:22px 0;
+  }
+  .step-head{display:flex;align-items:center;gap:14px;margin-bottom:4px}
+  .num{
+    flex:0 0 auto;
+    width:38px;height:38px;border-radius:12px;
+    background:var(--accent);color:#fff;
+    font-size:17px;font-weight:700;
+    display:flex;align-items:center;justify-content:center;
+    box-shadow:0 6px 14px rgba(0,113,227,.28);
+  }
+  .step.is-warn .num{background:var(--warn);box-shadow:0 6px 14px rgba(255,159,10,.3)}
+  .step-title{margin:0;font-size:19px;font-weight:650;letter-spacing:-.01em}
+  .step-sub{margin:2px 0 0;color:var(--ink-3);font-size:13.5px}
+
+  figure{margin:20px 0 6px}
+  figure a{display:block;line-height:0}
+  figure img{
+    width:100%;height:auto;display:block;
+    border-radius:14px;
+    border:1px solid var(--line);
+    background:#fff;
+    box-shadow:0 10px 28px rgba(0,0,0,.10);
+  }
+  figcaption{
+    margin-top:10px;font-size:13.5px;color:var(--ink-3);text-align:center;
+  }
+
+  /* ---------- 命令块 ---------- */
+  .cmd{
+    position:relative;
+    display:flex;align-items:center;gap:12px;
+    margin:14px 0;
+    padding:14px 16px;
+    background:#1d1d1f;color:#f5f5f7;
+    border-radius:12px;
+    font:14px/1.6 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+    overflow-x:auto;
+  }
+  .cmd code{
+    background:none;padding:0;color:inherit;
+    font:inherit;white-space:pre;
+  }
+  .cmd .prompt{color:#7bd88f;user-select:none}
+  .cmd .copy{
+    margin-left:auto;flex:0 0 auto;
+    appearance:none;border:1px solid rgba(255,255,255,.22);
+    background:rgba(255,255,255,.10);color:#f5f5f7;
+    font:600 12.5px/1 -apple-system,BlinkMacSystemFont,"PingFang SC",sans-serif;
+    padding:8px 12px;border-radius:8px;cursor:pointer;
+    transition:background .15s ease,transform .1s ease;
+  }
+  .cmd .copy:hover{background:rgba(255,255,255,.18)}
+  .cmd .copy:active{transform:scale(.96)}
+  .cmd .copy.done{background:rgba(52,199,89,.25);border-color:rgba(52,199,89,.45)}
+
+  /* ---------- 提示条 ---------- */
+  .tip{
+    display:flex;gap:12px;
+    padding:14px 16px;border-radius:12px;
+    margin:14px 0;font-size:14.5px;
+    background:var(--accent-soft);color:#0b3f6e;
+  }
+  .tip.warn{background:var(--warn-soft);color:#7a4a00}
+  .tip.danger{background:var(--danger-soft);color:#8a1f18}
+  .tip .ico{
+    flex:0 0 auto;width:22px;height:22px;border-radius:50%;
+    background:rgba(0,0,0,.10);
+    display:flex;align-items:center;justify-content:center;
+    font-size:13px;font-weight:800;margin-top:1px;
+  }
+  .tip > div:last-child{min-width:0}
+
+  /* ---------- 成功 / 结尾 ---------- */
+  .success{background:linear-gradient(180deg,#fff 0%,#f7fdf9 100%);border-color:rgba(52,199,89,.28)}
+  .success h2{color:#1a7f37}
+  .success h2 .check{
+    width:26px;height:26px;border-radius:50%;
+    background:var(--ok);color:#fff;font-size:15px;
+    display:inline-flex;align-items:center;justify-content:center;
+  }
+
+  details{
+    border-top:1px solid var(--line);
+    padding:14px 0 6px;
+  }
+  details:first-of-type{border-top:none;padding-top:4px}
+  summary{
+    cursor:pointer;font-weight:600;list-style:none;
+    display:flex;align-items:center;gap:10px;
+  }
+  summary::-webkit-details-marker{display:none}
+  summary::before{
+    content:"＋";flex:0 0 auto;
+    width:22px;height:22px;border-radius:6px;
+    background:rgba(0,0,0,.05);color:var(--ink-2);
+    font-size:14px;font-weight:700;line-height:22px;text-align:center;
+    transition:transform .18s ease;
+  }
+  details[open] summary::before{content:"－"}
+  details p,details ul{color:var(--ink-2);font-size:15px}
+
+  footer{
+    text-align:center;color:var(--ink-3);font-size:13px;
+    margin:44px 0 0;padding-top:20px;
+    border-top:1px solid var(--line);
+  }
+  kbd{
+    font:12.5px/1 ui-monospace,Menlo,monospace;
+    background:#fff;border:1px solid var(--line);
+    border-bottom-width:2px;border-radius:6px;
+    padding:3px 6px;color:var(--ink-2);
+  }
+
+  @media (max-width:640px){
+    body{padding:0 14px 56px}
+    .hero{padding:36px 4px 18px}
+    .card,.step{padding:20px 18px;border-radius:16px}
+    .quick-list li{padding-left:38px}
+    .cmd{flex-wrap:wrap}
+    .cmd .copy{margin-left:0}
+  }
+
+  @media print{
+    body{background:#fff;padding:0}
+    .card,.step{box-shadow:none;break-inside:avoid}
+    .cmd .copy{display:none}
+    figure img{box-shadow:none}
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="hero">
+    <div class="eyebrow">macOS · Apple 芯片（arm64）</div>
+    <h1>Mac 版启动说明</h1>
+    <p class="sub">第一次打开会被 macOS 拦截 1～2 次，这是系统对「网上下载的脚本」的常规保护。按下面的步骤放行一次，以后双击就能启动。</p>
+    <div class="hero-meta">
+      <span>内置 Python 3.12</span>
+      <span>依赖已打包，无需安装</span>
+      <span>启动无需联网</span>
+      <span>仅支持 M1/M2/M3/M4</span>
+    </div>
+  </header>
+
+  <main>
+
+    <!-- ============ 快速结论 ============ -->
+    <section class="card quick">
+      <h2>先看结论：一共 4 步</h2>
+      <ol class="quick-list">
+        <li>双击 <code>mac-启动服务.command</code>，弹窗提示「无法验证开发者」时，点 <b>完成</b>。</li>
+        <li>打开 <b>系统设置 → 隐私与安全性</b>，在「安全性」里点 <b>仍要打开</b>。</li>
+        <li>回到文件夹再次双击，弹窗问「打开 …?」时点 <b>仍要打开</b>。</li>
+        <li>如果提示 <b>没有正确的访问权限</b>：打开终端，进入解压目录，执行 <code>chmod +x mac-启动服务.command</code>。</li>
+      </ol>
+    </section>
+
+    <!-- ============ 步骤 0 ============ -->
+    <section class="step">
+      <div class="step-head">
+        <div class="num">0</div>
+        <div>
+          <h2 class="step-title">先解压，确认文件夹是完整的</h2>
+          <p class="step-sub">不要只拖出 main.py</p>
+        </div>
+      </div>
+      <p>把收到的压缩包解压成文件夹，文件夹里应当能看到这些内容：</p>
+      <ul>
+        <li><code>mac-启动服务.command</code> — 双击启动用</li>
+        <li><code>mac-一键修复.command</code> — 遇到任何奇怪问题时先双击它，自动体检并修复</li>
+        <li><code>mac-修复权限.command</code> — 权限被系统拦住时用</li>
+        <li><code>python-mac/</code> — 内置的 Python 运行环境与全部依赖（<b>不要删除、不要改名</b>）</li>
+        <li><code>main.py</code>、<code>static/</code>、<code>data/</code>、<code>API/</code> 等程序文件</li>
+      </ul>
+      <div class="tip warn">
+        <div class="ico">!</div>
+        <div>建议把文件夹放在「下载」或「桌面」等<b>你本人有读写权限</b>的位置，不要直接放在只读的 DMG 或系统目录里，也不要放在网盘同步中的只读状态。</div>
+      </div>
+      <p class="muted">启动脚本的图标是「创」图案。若显示为终端图标，说明自定义图标在传输中丢失（不影响使用）：双击 <code>mac-修复权限.command</code> 即可从 <code>创.icns</code> 恢复。</p>
+    </section>
+
+    <!-- ============ 步骤 1 ============ -->
+    <section class="step is-warn">
+      <div class="step-head">
+        <div class="num">1</div>
+        <div>
+          <h2 class="step-title">第一次双击，出现「无法验证开发者」</h2>
+          <p class="step-sub">这是系统拦截，不是文件损坏</p>
+        </div>
+      </div>
+      <p>双击 <code>mac-启动服务.command</code>，会看到下面的提示：</p>
+      <figure>
+        <a href="docs/mac-启动说明图片/01-无法验证开发者.png" target="_blank" rel="noopener">
+          <img src="docs/mac-启动说明图片/01-无法验证开发者.png" alt="弹窗：未打开 mac-修复权限.command，Apple 无法验证是否包含恶意软件，按钮为「完成」和「移到废纸篓」">
+        </a>
+        <figcaption>图 1 · 系统提示「未打开 …」——点「完成」，<b>不要点「移到废纸篓」</b>（点击图片可查看大图）</figcaption>
+      </figure>
+      <div class="tip danger">
+        <div class="ico">×</div>
+        <div>千万不要点蓝色的「移到废纸篓」，那会把脚本删掉。请点左侧灰色的 <b>完成</b> 关闭窗口。</div>
+      </div>
+    </section>
+
+    <!-- ============ 步骤 2 ============ -->
+    <section class="step">
+      <div class="step-head">
+        <div class="num">2</div>
+        <div>
+          <h2 class="step-title">到「隐私与安全性」里点「仍要打开」</h2>
+          <p class="step-sub">系统设置 → 隐私与安全性 → 安全性</p>
+        </div>
+      </div>
+      <ol>
+        <li>打开 <b>系统设置</b>（屏幕左上角  → 系统设置）。</li>
+        <li>在左侧找到 <b>隐私与安全性</b>，向下滚动到 <b>安全性</b> 区域。</li>
+        <li>看到「已阻止 “mac-启动服务.command” 以保护 Mac」时，点右侧的 <b>仍要打开</b>。</li>
+        <li>按提示输入开机密码，或用触控 ID 确认。</li>
+      </ol>
+      <figure>
+        <a href="docs/mac-启动说明图片/02-隐私与安全性-仍要打开.png" target="_blank" rel="noopener">
+          <img src="docs/mac-启动说明图片/02-隐私与安全性-仍要打开.png" alt="系统设置中的隐私与安全性页面，安全性区域显示已阻止该文件，右侧有「仍要打开」按钮">
+        </a>
+        <figcaption>图 2 · 「已阻止 … 以保护 Mac」右侧的 <b>仍要打开</b> 按钮（该提示只在拦截后出现，几分钟内有效）</figcaption>
+      </figure>
+      <div class="tip">
+        <div class="ico">i</div>
+        <div>如果在这个页面里<b>没有看到</b>「已阻止 …」这一条：说明拦截记录已超时。请回到步骤 1 重新双击一次脚本，再立刻回到这里查看。</div>
+      </div>
+    </section>
+
+    <!-- ============ 步骤 3 ============ -->
+    <section class="step">
+      <div class="step-head">
+        <div class="num">3</div>
+        <div>
+          <h2 class="step-title">再次双击，在弹窗里确认「仍要打开」</h2>
+          <p class="step-sub">这一步会再问一次，属于正常流程</p>
+        </div>
+      </div>
+      <p>回到文件夹，再次双击 <code>mac-启动服务.command</code>，会弹出确认窗口：</p>
+      <figure>
+        <a href="docs/mac-启动说明图片/03-打开确认.png" target="_blank" rel="noopener">
+          <img src="docs/mac-启动说明图片/03-打开确认.png" alt="弹窗：打开 mac-修复权限.command？下方三个按钮为「移到废纸篓」「仍要打开」「完成」">
+        </a>
+        <figcaption>图 3 · 点中间的 <b>仍要打开</b>，输入密码后脚本就会运行</figcaption>
+      </figure>
+      <p class="muted">提示：弹窗里的文件名可能是 <code>mac-启动服务.command</code> 或 <code>mac-修复权限.command</code>，两者处理方式完全一样。</p>
+    </section>
+
+    <!-- ============ 步骤 4 ============ -->
+    <section class="step is-warn">
+      <div class="step-head">
+        <div class="num">4</div>
+        <div>
+          <h2 class="step-title">如果提示「没有正确的访问权限」：用终端补执行权限</h2>
+          <p class="step-sub">从网盘 / U 盘 / 压缩包传来时，可执行权限往往会丢失</p>
+        </div>
+      </div>
+      <p>双击后如果出现下面这个窗口，说明文件缺少「可执行」权限位，需要手动补一次：</p>
+      <figure>
+        <a href="docs/mac-启动说明图片/04-没有访问权限.png" target="_blank" rel="noopener">
+          <img src="docs/mac-启动说明图片/04-没有访问权限.png" alt="错误弹窗：文件 mac-修复权限.command 无法执行，因为你没有正确的访问权限">
+        </a>
+        <figcaption>图 4 · 「文件 … 无法执行，因为你没有正确的访问权限」——按下面 3 小步用终端修复</figcaption>
+      </figure>
+
+      <h3>① 打开「终端」</h3>
+      <ul>
+        <li>按 <kbd>⌘</kbd> + <kbd>空格</kbd> 打开聚焦搜索，输入 <b>终端</b>（或 <b>Terminal</b>），回车；</li>
+        <li>或：启动台 → 其他 → 终端。</li>
+      </ul>
+
+      <h3>② 进入解压后的文件夹</h3>
+      <p>在终端里先输入 <code>cd</code> 和一个<b>空格</b>，然后把文件夹从「访达」直接<b>拖进终端窗口</b>，路径会自动补全（带空格的路径也会自动加引号），再按回车：</p>
+      <div class="cmd">
+        <span class="prompt">$</span><code id="cd-cmd">cd /你的路径/画布文件夹</code>
+        <button class="copy" data-copy="cd /你的路径/画布文件夹">复制</button>
+      </div>
+      <p class="muted">不想拖动的话，也可以在访达里右键文件夹 → 按住 <kbd>⌥ Option</kbd> 键 → 「拷贝…为路径名」，再粘贴到终端。</p>
+
+      <h3>③ 执行加权限命令</h3>
+      <p>确认终端提示符里显示的是该文件夹后，输入下面这行并回车（<b>不会输出任何内容</b>，没有报错就是成功）：</p>
+      <div class="cmd">
+        <span class="prompt">$</span><code id="chmod-cmd">chmod +x mac-启动服务.command</code>
+        <button class="copy" data-copy="chmod +x mac-启动服务.command">复制命令</button>
+      </div>
+
+      <div class="tip">
+        <div class="ico">i</div>
+        <div>如果提示 <code>chmod: No such file or directory</code>，说明当前目录不对——请回到第 ② 步重新进入文件夹，可以用 <code>ls</code> 命令确认能看到 <code>mac-启动服务.command</code> 再执行。</div>
+      </div>
+
+      <details>
+        <summary>顺带把内置运行环境和其它脚本也补上权限（推荐）</summary>
+        <p>一次性把三个脚本和内置 Python 都设为可执行，避免后面再遇到同类提示：</p>
+        <div class="cmd">
+          <span class="prompt">$</span><code>chmod +x mac-启动服务.command mac-修复权限.command python-mac/bin/*</code>
+          <button class="copy" data-copy="chmod +x mac-启动服务.command mac-修复权限.command python-mac/bin/*">复制</button>
+        </div>
+      </details>
+
+      <p>执行完 <code>chmod</code> 后，重新双击 <code>mac-启动服务.command</code> 即可。</p>
+    </section>
+
+    <!-- ============ 启动成功 ============ -->
+    <section class="card success">
+      <h2><span class="check">✓</span>启动成功的标志</h2>
+      <p>终端窗口里会出现类似下面的信息，说明服务已经在运行：</p>
+      <div class="cmd">
+        <code>使用内置 Python 运行环境（无需安装依赖库）
+本机访问： http://127.0.0.1:3000/
+局域网访问： http://192.168.x.x:3000/
+INFO:     Uvicorn running on http://0.0.0.0:3000</code>
+      </div>
+      <p><b>服务就绪后会自动在浏览器打开</b> <a href="http://127.0.0.1:3000/" target="_blank" rel="noopener">http://127.0.0.1:3000/</a>，通常几秒内完成；如果浏览器没弹出来，手动点这个链接打开即可。</p>
+      <ul>
+        <li><b>本机使用</b>：<code>http://127.0.0.1:3000/</code>（启动后自动打开）</li>
+        <li><b>局域网其它设备</b>：用启动时显示的那个 <code>192.168.x.x</code> 地址</li>
+        <li><b>停止服务</b>：在终端窗口按 <kbd>⌃</kbd> <kbd>C</kbd>，或直接关闭终端窗口</li>
+      </ul>
+      <div class="tip">
+        <div class="ico">i</div>
+        <div>以后每次启动，只要双击 <code>mac-启动服务.command</code> 即可，<b>不会再弹上面的安全提示</b>。启动窗口需要保持开着，关掉窗口服务就会停止。</div>
+      </div>
+    </section>
+
+    <!-- ============ 常见问题 ============ -->
+    <section class="card">
+      <h2>常见问题</h2>
+
+      <details open>
+        <summary>遇到奇怪问题？先双击「mac-一键修复.command」</summary>
+        <p>它会逐项体检并自动修复：芯片架构、文件夹是否可写、文件是否完整、执行权限、Gatekeeper 隔离属性、内置 Python 与依赖、脚本图标、3000 端口占用，最后给出「✓ 正常 / ⚠ 提醒 / ✗ 失败」报告。</p>
+        <p>脚本只改权限、扩展属性和图标，<b>不联网、不碰画布数据</b>；修完再双击启动脚本即可。</p>
+        <div class="cmd">
+          <span class="prompt">$</span><code>./mac-一键修复.command</code>
+          <button class="copy" data-copy="./mac-一键修复.command">复制</button>
+        </div>
+      </details>
+
+      <details>
+        <summary>为什么会被拦？这些脚本安全吗？</summary>
+        <p>macOS 会给从浏览器、网盘、隔空投送下载的文件打上「隔离」标记（quarantine），脚本类文件被拦截后会提示「无法验证开发者」。这只是<b>来源检查</b>，不代表文件有病毒。<code>chmod +x</code> 做的事也只是给文件补上「可执行」权限位，不会修改内容。</p>
+      </details>
+
+      <details>
+        <summary>双击后终端窗口一闪就消失了</summary>
+        <p>说明启动过程中出错了。请在终端里手动运行，才能看到具体报错：</p>
+        <div class="cmd">
+          <span class="prompt">$</span><code>./mac-启动服务.command</code>
+          <button class="copy" data-copy="./mac-启动服务.command">复制</button>
+        </div>
+        <p>若提示 <code>Permission denied</code>，先执行 <code>chmod +x mac-启动服务.command</code>。</p>
+      </details>
+
+      <details>
+        <summary>提示「当前架构为 x86_64」</summary>
+        <p>本文件夹内置的是 <b>Apple 芯片（arm64）</b>版本，只支持 M1 / M2 / M3 / M4 等 Mac。Intel 芯片的 Mac 无法直接用这个包，请换用对应的 Intel 版本。</p>
+      </details>
+
+      <details>
+        <summary>提示「依赖自检未通过」</summary>
+        <p>说明 <code>python-mac/</code> 不完整（拷贝中断、被清理软件删除、解压时丢文件）。请重新完整拷贝整个文件夹。本包已内置全部依赖，<b>不需要</b>另外执行 <code>pip install</code>。</p>
+      </details>
+
+      <details>
+        <summary>提示端口 3000 被占用</summary>
+        <p>不用处理。启动脚本会自动结束占用 3000 端口的旧进程，再启动服务。</p>
+      </details>
+
+      <details>
+        <summary>可以只用系统自带的 Python 启动吗？</summary>
+        <p>不建议。内置的 <code>python-mac/</code> 已经带齐所有依赖，用它启动最省事：</p>
+        <div class="cmd">
+          <span class="prompt">$</span><code>./python-mac/bin/python3 main.py</code>
+          <button class="copy" data-copy="./python-mac/bin/python3 main.py">复制</button>
+        </div>
+        <p>用系统 Python 则可能缺少 fastapi、uvicorn 等库，需要自己装依赖。</p>
+      </details>
+
+      <details>
+        <summary>启动后没有自动打开浏览器</summary>
+        <p>脚本会等 3000 端口就绪后自动用默认浏览器打开页面。若没弹出（例如默认浏览器被改过、系统拦截了打开动作），手动访问 <a href="http://127.0.0.1:3000/" target="_blank" rel="noopener">http://127.0.0.1:3000/</a> 即可。</p>
+        <p>如果本来就不想自动打开，可以在终端里这样启动：</p>
+        <div class="cmd">
+          <span class="prompt">$</span><code>NO_BROWSER=1 ./mac-启动服务.command</code>
+          <button class="copy" data-copy="NO_BROWSER=1 ./mac-启动服务.command">复制</button>
+        </div>
+      </details>
+    </section>
+
+    <!-- ============ 补充说明 ============ -->
+    <section class="card">
+      <h2>关于内置运行环境</h2>
+      <p>文件夹里的 <code>python-mac/</code> 是一个<b>完整的、可随文件夹搬移</b>的 Python 3.12 运行环境（Apple 芯片版），第三方依赖已全部装好：</p>
+      <ul>
+        <li>Web 服务：fastapi、starlette、uvicorn、websockets</li>
+        <li>数据处理：pydantic、httpx、requests、anyio</li>
+        <li>图片处理：pillow（PIL）</li>
+        <li>表单上传 / 配置：python-multipart、python-dotenv、pyyaml</li>
+      </ul>
+      <p>所以换一台 Apple 芯片 Mac 时，<b>把整个文件夹拷过去</b>，双击启动就行，既不用装 Python，也不用联网下载依赖。</p>
+      <div class="tip warn">
+        <div class="ico">!</div>
+        <div><code>python-mac/</code> 约 114 MB，请勿删除、改名或单独移动；也不要把里面的内容拆开拷贝。</div>
+      </div>
+    </section>
+
+  </main>
+
+  <footer>
+    无限画布 · Mac 版启动说明 &nbsp;|&nbsp; 适用于 macOS 11+ 的 Apple 芯片 Mac &nbsp;|&nbsp; 遇到问题请把终端里的报错截图发给技术支持
+  </footer>
+
+</div>
+
+<script>
+  document.querySelectorAll('.copy').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      var text = btn.getAttribute('data-copy') || '';
+      var done = function () {
+        var old = btn.textContent;
+        btn.textContent = '已复制';
+        btn.classList.add('done');
+        setTimeout(function () {
+          btn.textContent = old;
+          btn.classList.remove('done');
+        }, 1600);
+      };
+      if (navigator.clipboard && window.isSecureContext) {
+        navigator.clipboard.writeText(text).then(done).catch(fallback);
+      } else {
+        fallback();
+      }
+      function fallback() {
+        var ta = document.createElement('textarea');
+        ta.value = text;
+        ta.setAttribute('readonly', '');
+        ta.style.position = 'fixed';
+        ta.style.left = '-9999px';
+        document.body.appendChild(ta);
+        ta.select();
+        try { document.execCommand('copy'); done(); } catch (e) {}
+        document.body.removeChild(ta);
+      }
+    });
+  });
+</script>
+</body>
+</html>
