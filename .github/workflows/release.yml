@@ -1,0 +1,35 @@
+name: Create release from version tag
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Create GitHub Release
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const tag = context.ref.replace('refs/tags/', '');
+            const changelog = require('fs').readFileSync('CHANGELOG.md', 'utf8');
+            const firstSection = changelog.split(/^## /m).slice(1, 2).join('## ');
+            const body = firstSection || `请查看仓库中的 CHANGELOG.md。\n\n版本标签：${tag}`;
+            await github.rest.repos.createRelease({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              tag_name: tag,
+              name: tag,
+              body,
+              generate_release_notes: false,
+              draft: false,
+              prerelease: false,
+            });
