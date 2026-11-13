@@ -1,3 +1,11 @@
+---
+domain: multi-modal
+tags:
+  - AIGC
+  - canvas
+license: Apache License 2.0
+---
+
 # 创客训练营 · 无限画布 2026.08（外部版）
 
 这是面向学员的无限画布外部发布版，提供节点式画布、图片生成、图生图、素材管理、工作流和多平台 API 配置功能。
