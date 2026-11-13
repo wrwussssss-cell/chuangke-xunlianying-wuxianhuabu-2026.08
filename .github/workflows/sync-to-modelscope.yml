@@ -1,0 +1,42 @@
+name: Sync source to ModelScope Studio
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  sync:
+    # Do not expose the ModelScope credential to workflows from forks.
+    if: github.repository == 'wrwussssss-cell/chuangke-xunlianying-wuxianhuabu-2026.08'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Push main branch to ModelScope Studio
+        env:
+          MODELSCOPE_TOKEN: ${{ secrets.MODELSCOPE_TOKEN }}
+          MODELSCOPE_REPO: wrwussssss/11chuangkexunlianying-wuxianhuabu
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > "$RUNNER_TEMP/modelscope-askpass.sh" <<'EOF'
+          #!/bin/sh
+          case "$1" in
+            *Username*) printf '%s\n' 'oauth2' ;;
+            *Password*) printf '%s\n' "$MODELSCOPE_TOKEN" ;;
+          esac
+          EOF
+          chmod 700 "$RUNNER_TEMP/modelscope-askpass.sh"
+
+          git remote add modelscope "https://www.modelscope.cn/studios/${MODELSCOPE_REPO}.git"
+          GIT_ASKPASS="$RUNNER_TEMP/modelscope-askpass.sh" \
+          GIT_TERMINAL_PROMPT=0 \
+          git push modelscope HEAD:master
+          rm -f "$RUNNER_TEMP/modelscope-askpass.sh"
