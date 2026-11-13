@@ -19,13 +19,40 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Push main branch to ModelScope Studio
+      - name: Publish deployable source snapshot to ModelScope Studio
         env:
           MODELSCOPE_TOKEN: ${{ secrets.MODELSCOPE_TOKEN }}
           MODELSCOPE_REPO: wrwussssss/11chuangkexunlianying-wuxianhuabu
         shell: bash
         run: |
           set -euo pipefail
+
+          # The desktop packages contain Windows/macOS Python runtimes.  They
+          # cannot run in a Linux Studio and ModelScope rejects their large
+          # binaries.  Publish only application source and safe templates.
+          SNAPSHOT_DIR="$RUNNER_TEMP/modelscope-source"
+          mkdir -p "$SNAPSHOT_DIR"
+          rsync -a --delete \
+            --exclude='.git/' \
+            --exclude='.github/' \
+            --exclude='python/' \
+            --exclude='mac/python-mac/' \
+            --exclude='data/canvases/' \
+            --exclude='data/conversations/' \
+            --exclude='data/media_previews/' \
+            --exclude='data/update_backups/' \
+            --exclude='assets/input/' \
+            --exclude='assets/output/' \
+            --exclude='assets/uploads/' \
+            "$GITHUB_WORKSPACE/" "$SNAPSHOT_DIR/"
+
+          cd "$SNAPSHOT_DIR"
+          git init -b master
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add --all
+          git commit -m "Sync source from GitHub ${GITHUB_SHA}"
+
           cat > "$RUNNER_TEMP/modelscope-askpass.sh" <<'EOF'
           #!/bin/sh
           case "$1" in
@@ -36,6 +63,12 @@ jobs:
           chmod 700 "$RUNNER_TEMP/modelscope-askpass.sh"
 
           git remote add modelscope "https://www.modelscope.cn/studios/${MODELSCOPE_REPO}.git"
+          GIT_ASKPASS="$RUNNER_TEMP/modelscope-askpass.sh" \
+          GIT_TERMINAL_PROMPT=0 \
+          git fetch modelscope master
+          # Keep ModelScope's initial repository history while GitHub remains
+          # the authoritative source tree for subsequent syncs.
+          git merge --allow-unrelated-histories --no-edit -s ours modelscope/master
           GIT_ASKPASS="$RUNNER_TEMP/modelscope-askpass.sh" \
           GIT_TERMINAL_PROMPT=0 \
           git push modelscope HEAD:master
