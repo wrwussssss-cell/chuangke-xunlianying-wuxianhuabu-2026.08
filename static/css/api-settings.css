@@ -48,6 +48,9 @@ html.studio-theme-dark body .provider-card.provider-card-banner.active { box-sha
 .kie-provider-label { display:flex; flex-direction:column; align-items:flex-end; line-height:1.1; color:var(--text); white-space:nowrap; }
 .kie-provider-label strong { font-size:11px; font-weight:850; letter-spacing:.2px; }
 .kie-provider-label small { margin-top:3px; color:var(--muted); font-size:9px; font-weight:700; }
+.runninghub-provider-label { display:flex; flex-direction:column; align-items:flex-end; line-height:1.1; color:var(--text); white-space:nowrap; }
+.runninghub-provider-label strong { font-size:11px; font-weight:850; letter-spacing:.2px; }
+.runninghub-provider-label small { margin-top:3px; color:var(--muted); font-size:9px; font-weight:700; }
 .provider-card-banner .t8-provider-banner-inner { justify-content:space-between; gap:8px; padding:1px 4px; }
 .t8-brand-mark { display:flex; align-items:center; min-width:0; height:30px; overflow:hidden; border-radius:7px; background:#07090f; }
 .t8-brand-mark img { width:139px; height:30px; max-width:139px; object-fit:cover; object-position:left center; }

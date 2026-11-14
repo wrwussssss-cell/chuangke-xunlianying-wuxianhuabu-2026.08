@@ -2424,7 +2424,7 @@ function renderProviderList(){
                             <img src="/static/images/RunningHub-W.png" alt="RunningHub" class="runninghub-icon ms-icon-dark">
                             <span class="provider-logo-fallback">RunningHub</span>
                         </span>
-                        <span class="provider-protocol-pill">RH</span>
+                        <span class="runninghub-provider-label"><strong>RunningHub</strong><small>AI 创作平台</small></span>
                     </span>
                 </button>
             `;
