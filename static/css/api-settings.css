@@ -92,6 +92,22 @@ html.studio-theme-dark body .api-link-btn:hover { background:#ffffff; border-col
     line-height:1.45;
     font-weight:650;
 }
+
+/* Platform list: keep every provider in one compact horizontal row. */
+.provider-card.provider-card-banner .provider-banner-inner {
+    display:grid !important;
+    grid-template-columns:minmax(0,1fr) auto !important;
+    align-items:center !important;
+    justify-items:stretch !important;
+    text-align:left !important;
+    gap:10px !important;
+}
+.provider-card.provider-card-banner .provider-logo-wrap { justify-content:flex-start !important; }
+.provider-card.provider-card-banner .t8-provider-label,
+.provider-card.provider-card-banner .autodl-provider-label,
+.provider-card.provider-card-banner .kie-provider-label,
+.provider-card.provider-card-banner .vip-gpt-provider-label,
+.provider-card.provider-card-banner .modelscope-provider-label { align-items:flex-end !important; }
 .recommend-api-body { display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:14px; padding:18px 20px 6px; }
 /* 推荐分组（稳定/便宜）：组容器占满整行，组内卡片继续两列 */
 .recommend-group { grid-column:1 / -1; display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:14px; }
