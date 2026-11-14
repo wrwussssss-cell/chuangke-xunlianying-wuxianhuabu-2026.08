@@ -10059,6 +10059,12 @@ def normalize_volcengine_size(size, model=""):
 def friendly_image_error_detail(text, size="", model=""):
     text = str(text or "")
     lower_text = text.lower()
+    if "no available compatible accounts" in lower_text:
+        return (
+            "VIP-GPT 当前没有可用的兼容上游账号，暂时无法完成本次生图。"
+            "请到 VIP-GPT 后台检查 API Key 的分组/订阅是否支持当前模型（尤其是图像生成或图生图），"
+            "并确认额度和上游账号状态正常后再试。当前请求未自动切换其他平台，避免重复扣费。"
+        )
     if is_gpt_image_2_model(model) and gpt_image_2_size_exceeds_supported(size):
         return gpt_image_2_size_error_message(size)
     mentions_size = any(token in lower_text for token in ["size", "resolution", "dimension"])
