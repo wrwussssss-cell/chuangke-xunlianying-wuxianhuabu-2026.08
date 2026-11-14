@@ -93,7 +93,7 @@ const CODEX_DEFAULT_CHAT_MODELS = ['gpt-5.5'];
 const GEMINI_CLI_DEFAULT_IMAGE_MODELS = ['auto'];
 const GEMINI_CLI_DEFAULT_CHAT_MODELS = ['auto'];
 const CLI_PROTOCOLS = new Set(['jimeng', 'codex', 'gemini-cli']);
-const API_PROTOCOLS = ['openai', 'apimart', 'gemini', 'volcengine', 'runninghub', 'jimeng', 'codex', 'gemini-cli'];
+const API_PROTOCOLS = ['openai', 'apimart', 'gemini', 'kie', 'volcengine', 'runninghub', 'jimeng', 'codex', 'gemini-cli'];
 const CLI_PROVIDER_PRESETS = {
     jimeng:{id:'jimeng', name:'即梦 CLI', protocol:'jimeng'},
     codex:{id:'codex', name:'GPT CLI', protocol:'codex'},
@@ -153,6 +153,22 @@ let recommendInlineOpen = false;
 let providerDragId = '';
 // category: 'allround'（全能）| 'value'（性价比）| 'free'（免费），推荐面板按分组分节展示
 const RECOMMENDED_APIS = [
+    {
+        id:'kie',
+        name:'Kie.ai',
+        category:'allround',
+        base_url:'https://api.kie.ai',
+        protocol:'kie',
+        image_request_mode:'kie-async',
+        register_url:'https://kie.ai/api-key',
+        tagKeys:['api.tagImageModels','api.tagImageToImage'],
+        icons:['IMG'],
+        summaryKey:'api.recommendKieSummary',
+        advantages:['GPT Image 图像生成', '支持图生图参考图', '异步任务接口'],
+        image_models:['gpt-image-2-5-sunburst-text-to-image','gpt-image-2-5-sunburst-image-to-image'],
+        chat_models:[],
+        video_models:[]
+    },
     {
         id:'t8',
         name:'T8 API',
@@ -400,7 +416,7 @@ function deriveIdFromName(name, existingId){
 function updateIdPreview(){
     const item = provider();
     if(!item) return;
-    const isBuiltin = item.id === 'comfly' || item.id === 'modelscope' || item.id === 'runninghub' || item.id === 'volcengine' || item.id === 'jimeng';
+    const isBuiltin = item.id === 'kie' || item.id === 'comfly' || item.id === 'modelscope' || item.id === 'runninghub' || item.id === 'volcengine' || item.id === 'jimeng';
     const idPreview = document.getElementById('idPreview');
     if(!idPreview) return;
     if(isBuiltin){
@@ -421,7 +437,7 @@ function visibleProviders(){
 function isFixedProvider(itemOrId){
     const id = typeof itemOrId === 'string' ? itemOrId : itemOrId?.id;
     // 即梦 CLI 不再是固定平台：可删除、可排序，未添加则不存在。
-    return id === 't8' || id === 'runninghub' || isAutodlProvider(itemOrId);
+    return id === 'kie' || id === 't8' || id === 'runninghub' || isAutodlProvider(itemOrId);
 }
 function isAutodlProvider(itemOrId){
     const item = typeof itemOrId === 'string' ? {id:itemOrId} : (itemOrId || {});
@@ -803,7 +819,7 @@ function syncEditor(){
     // 固定平台不从协议下拉读取
     item.protocol = selectedProtocol;
     item.image_request_mode = normalizeImageRequestMode(
-        item.id === 'modelscope' || item.id === 'runninghub' || item.id === 'volcengine' || CLI_PROTOCOLS.has(selectedProtocol)
+        item.id === 'kie' || item.id === 'modelscope' || item.id === 'runninghub' || item.id === 'volcengine' || CLI_PROTOCOLS.has(selectedProtocol)
             ? 'openai'
             : lockedApi
             ? lockedApi.image_request_mode
@@ -2207,7 +2223,9 @@ function renderRecommendApi(){
         recommendPanel.innerHTML = '';
         return;
     }
-    const recommendProtocolBadge = api => api.id === 'runninghub' || api.protocol === 'runninghub'
+    const recommendProtocolBadge = api => api.id === 'kie' || api.protocol === 'kie'
+        ? 'Kie.ai'
+        : api.id === 'runninghub' || api.protocol === 'runninghub'
         ? 'RH'
         : api.id === 'modelscope'
         ? 'ModelScope'
@@ -2355,7 +2373,7 @@ async function saveRecommendedApi(index){
     if(ok) setStatus(trf('api.recommendSaved', {name:api.name}));
 }
 function sortedProviders(){
-    const order = ['t8', 'runninghub'];
+    const order = ['kie', 't8', 'runninghub'];
     return visibleProviders().sort((a, b) => {
         const ai = isAutodlProvider(a) ? 2 : order.indexOf(a.id);
         const bi = isAutodlProvider(b) ? 2 : order.indexOf(b.id);
@@ -2874,7 +2892,7 @@ function currentProviderApiKey(item){
 }
 function normalizeImageRequestMode(value){
     const mode = String(value || '').trim().toLowerCase();
-    return ['openai', 'openai-json', 'openai-video-proxy', 'openai-responses', 'tudou-async'].includes(mode) ? mode : 'openai';
+    return ['openai', 'openai-json', 'openai-video-proxy', 'openai-responses', 'tudou-async', 'kie-async'].includes(mode) ? mode : 'openai';
 }
 function normalizeImageEditRoute(value){
     const route = String(value || '').trim().toLowerCase();
