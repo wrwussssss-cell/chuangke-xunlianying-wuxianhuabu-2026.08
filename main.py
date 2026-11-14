@@ -446,8 +446,8 @@ JIMENG_LOGIN_SESSION = {
 }
 
 PROVIDER_ID_RE = re.compile(r"^[a-zA-Z0-9_-]{2,40}$")
-SUPPORTED_PROVIDER_PROTOCOLS = {"openai", "apimart", "gemini", "gemini-cli", "volcengine", "runninghub", "jimeng", "codex"}
-SUPPORTED_IMAGE_REQUEST_MODES = {"openai", "openai-json", "openai-video-proxy", "openai-responses", "tudou-async", "t8-async"}
+SUPPORTED_PROVIDER_PROTOCOLS = {"openai", "apimart", "gemini", "gemini-cli", "volcengine", "runninghub", "jimeng", "codex", "kie"}
+SUPPORTED_IMAGE_REQUEST_MODES = {"openai", "openai-json", "openai-video-proxy", "openai-responses", "tudou-async", "t8-async", "kie-async"}
 RUNNINGHUB_DEFAULT_BASE_URL = "https://www.runninghub.ai"
 RUNNINGHUB_OPENAPI_BASE_URL = "https://www.runninghub.ai/openapi/v2"
 RUNNINGHUB_MODEL_REGISTRY_URL = "https://raw.githubusercontent.com/HM-RunningHub/ComfyUI_RH_OpenAPI/main/models_registry.json"
@@ -920,6 +920,26 @@ def default_api_providers():
     # 独立入口平台强制保留，其他平台均可自定义增删
     return [
         {
+            "id": "kie",
+            "name": "Kie.ai",
+            "base_url": "https://api.kie.ai",
+            "protocol": "kie",
+            "image_request_mode": "kie-async",
+            "image_generation_endpoint": "/api/v1/jobs/createTask",
+            "image_edit_endpoint": "/api/v1/jobs/createTask",
+            "guide_url": "https://kie.ai/zh-CN/market",
+            "enabled": True,
+            "primary": False,
+            "image_models": [
+                "gpt-image-2-5-sunburst-text-to-image",
+                "gpt-image-2-5-sunburst-image-to-image",
+            ],
+            "chat_models": [],
+            "video_models": [],
+            "ms_loras": [],
+            "ms_defaults_version": 0,
+        },
+        {
             "id": "modelscope",
             "name": "ModelScope",
             "base_url": MODELSCOPE_CHAT_BASE_URL,
@@ -975,6 +995,9 @@ def default_api_providers():
 
 def merge_default_api_providers(providers, inject_missing=True):
     merged = [dict(item) for item in providers]
+    kie_default = next((d for d in default_api_providers() if d["id"] == "kie"), None)
+    if kie_default and not any(item.get("id") == "kie" for item in merged) and inject_missing:
+        merged.insert(0, kie_default)
     # 强制保留独立入口平台（不再强制 comfly）
     ms_default = next((d for d in default_api_providers() if d["id"] == "modelscope"), None)
     if ms_default:
@@ -1063,7 +1086,12 @@ def merge_default_api_providers(providers, inject_missing=True):
         current["image_models"] = model_list_from_values([*image_models, *default_image_models])
         current["chat_models"] = model_list_from_values([*(current.get("chat_models") or []), *default_chat_models])
         current["video_models"] = []
-    return merged
+    preferred_ids = ["kie", "t8", "modelscope", "runninghub", "custom-api", "autodl", "vip-gpt"]
+    preferred_rank = {provider_id: index for index, provider_id in enumerate(preferred_ids)}
+    known = [item for item in merged if item.get("id") in preferred_rank]
+    unknown = [item for item in merged if item.get("id") not in preferred_rank]
+    known.sort(key=lambda item: preferred_rank[item.get("id")])
+    return known + unknown
 
 def normalize_model_list(values):
     return model_list_from_values(values)
@@ -4275,7 +4303,7 @@ def sse_event(data):
 
 IMAGE_OUTPUT_KEY_HINTS = (
     "url", "image_url", "imageUrl", "image", "output_url", "outputUrl",
-    "result_url", "resultUrl", "download_url", "downloadUrl", "asset_url", "assetUrl",
+    "result_url", "resultUrl", "resultUrls", "result_urls", "download_url", "downloadUrl", "asset_url", "assetUrl",
 )
 IMAGE_CONTAINER_KEY_HINTS = (
     "images", "image", "output", "outputs", "result", "results", "data", "items", "files",
@@ -4896,7 +4924,7 @@ def provider_protocol(provider):
 # 单模型可覆盖的协议（仅 OpenAI / Gemini，二者可共用同一站点的 Base URL + Key）
 PER_MODEL_PROTOCOL_OPTIONS = {"openai", "gemini"}
 # 协议固定、不支持单模型覆盖的内置平台
-FIXED_PROTOCOL_PROVIDER_IDS = {"modelscope", "volcengine", "jimeng", "runninghub"}
+FIXED_PROTOCOL_PROVIDER_IDS = {"modelscope", "volcengine", "jimeng", "runninghub", "kie"}
 
 def normalize_model_protocols(value):
     """规整 {模型名: 协议} 覆盖表，仅保留 openai/gemini。"""
@@ -4936,6 +4964,12 @@ def effective_protocol(provider, model=""):
 def is_apimart_provider(provider):
     base_url = str((provider or {}).get("base_url") or "").lower()
     return provider_protocol(provider) == "apimart" or "apimart.ai" in base_url
+
+def is_kie_provider(provider):
+    if not isinstance(provider, dict):
+        return False
+    base_url = str(provider.get("base_url") or "").lower()
+    return str(provider.get("id") or "").strip().lower() == "kie" or "api.kie.ai" in base_url
 
 def is_vip_gpt_provider(provider):
     """VIP-GPT exposes the OpenAI-compatible API, but not APIMart's upload route."""
@@ -5054,6 +5088,104 @@ async def tudou_async_reference_images(reference_images):
         if data_url and data_url.startswith("data:image/"):
             images.append(tudou_png_or_jpeg_data_url(data_url))
     return images
+
+def kie_model_for_request(model, has_references):
+    requested = str(model or "").strip() or "gpt-image-2-5-sunburst-text-to-image"
+    if has_references and requested.endswith("-text-to-image"):
+        return requested[:-len("-text-to-image")] + "-image-to-image"
+    if not has_references and requested.endswith("-image-to-image"):
+        return requested[:-len("-image-to-image")] + "-text-to-image"
+    return requested
+
+async def kie_upload_reference(client, provider, ref):
+    """将画布本地参考图上传到 Kie 临时文件服务，返回可供任务读取的 URL。"""
+    value = str((ref or {}).get("url") or "").strip()
+    path = output_file_from_url(value)
+    headers = api_headers(provider=provider)
+    upload_url = "https://kieai.redpandaai.co/api/file-stream-upload"
+    if path and os.path.isfile(path):
+        with open(path, "rb") as fh:
+            response = await client.post(
+                upload_url,
+                headers=headers,
+                data={"uploadPath": "images/user-uploads", "fileName": os.path.basename(path)},
+                files={"file": (os.path.basename(path), fh, content_type_for_path(path))},
+            )
+    elif value.startswith(("http://", "https://")):
+        response = await client.post(
+            "https://kieai.redpandaai.co/api/file-url-upload",
+            headers={**headers, "Content-Type": "application/json"},
+            json={"fileUrl": value, "uploadPath": "images/user-uploads", "fileName": os.path.basename(urllib.parse.urlparse(value).path) or "reference.png"},
+        )
+    else:
+        raise HTTPException(status_code=400, detail="Kie.ai 图生图无法读取参考图，请确认画布素材仍在本机。")
+    response.raise_for_status()
+    raw = response.json()
+    if raw.get("code") not in (None, 200, "200") or raw.get("success") is False:
+        raise HTTPException(status_code=502, detail=f"Kie.ai 参考图上传失败：{raw.get('msg') or str(raw)[:300]}")
+    data = raw.get("data") if isinstance(raw.get("data"), dict) else {}
+    download_url = data.get("downloadUrl") or data.get("download_url")
+    if not download_url:
+        raise HTTPException(status_code=502, detail=f"Kie.ai 参考图上传未返回 URL：{str(raw)[:300]}")
+    return download_url
+
+async def wait_for_kie_image_task(client, provider, task_id):
+    base_url = (provider.get("base_url") or "https://api.kie.ai").rstrip("/")
+    endpoint = f"{base_url}/api/v1/jobs/recordInfo"
+    deadline = time.monotonic() + 1800
+    last_payload = {}
+    while time.monotonic() < deadline:
+        response = await client.get(endpoint, params={"taskId": task_id}, headers=api_headers(provider=provider))
+        response.raise_for_status()
+        raw = response.json()
+        last_payload = raw
+        if raw.get("code") not in (None, 200, "200"):
+            raise HTTPException(status_code=502, detail=f"Kie.ai 任务查询失败：{raw.get('msg') or str(raw)[:300]}")
+        data = raw.get("data") if isinstance(raw.get("data"), dict) else {}
+        state = str(data.get("state") or "").strip().lower()
+        if state == "success":
+            result_json = data.get("resultJson")
+            if isinstance(result_json, str):
+                try:
+                    result_json = json.loads(result_json)
+                except Exception:
+                    result_json = {}
+            result_urls = (result_json or {}).get("resultUrls") if isinstance(result_json, dict) else None
+            if result_urls:
+                return {"data": {"resultUrls": result_urls}, "kie": raw}
+            raise HTTPException(status_code=502, detail="Kie.ai 任务成功但没有返回图片地址。")
+        if state in {"fail", "failed", "failure"}:
+            raise HTTPException(status_code=502, detail=f"Kie.ai 生图任务失败：{data.get('failMsg') or '上游未提供失败原因'}")
+        await asyncio.sleep(3)
+    raise HTTPException(status_code=504, detail=f"Kie.ai 生图任务超时，task_id={task_id}")
+
+async def generate_kie_provider_image(prompt, size, quality, model, reference_images=None, provider=None, aspect_ratio="", resolution=""):
+    refs = [ref for ref in (reference_images or []) if ref.get("url")]
+    requested_model = kie_model_for_request(model, bool(refs))
+    base_url = (provider.get("base_url") or "https://api.kie.ai").rstrip("/")
+    input_data = {
+        "prompt": str(prompt or ""),
+        "aspect_ratio": aspect_ratio or runninghub_aspect_from_size(size, "1:1"),
+        "resolution": str(resolution or "1K").upper() if str(resolution or "").strip() else "1K",
+        "background": "auto",
+    }
+    async with httpx.AsyncClient(timeout=httpx.Timeout(connect=30.0, read=1800.0, write=180.0, pool=20.0)) as client:
+        if refs:
+            input_data["input_urls"] = [await kie_upload_reference(client, provider, ref) for ref in refs[:ONLINE_IMAGE_REFERENCE_MAX]]
+        response = await client.post(
+            f"{base_url}/api/v1/jobs/createTask",
+            headers=api_headers(json_body=True, provider=provider, model=requested_model),
+            json={"model": requested_model, "input": input_data},
+        )
+        response.raise_for_status()
+        raw = response.json()
+        if raw.get("code") not in (None, 200, "200"):
+            raise HTTPException(status_code=502, detail=f"Kie.ai 创建任务失败：{raw.get('msg') or str(raw)[:300]}")
+        task_id = extract_task_id(raw)
+        if not task_id:
+            raise HTTPException(status_code=502, detail=f"Kie.ai 未返回 taskId：{str(raw)[:300]}")
+        result = await wait_for_kie_image_task(client, provider, task_id)
+        return extract_image(result), result
 
 async def generate_t8_async_image(prompt, size, quality, model, reference_images, provider, aspect_ratio="", resolution=""):
     """T8 API 的异步图片接口：POST /v1/image/generations，再轮询同一路径下的任务。"""
@@ -11486,6 +11618,8 @@ async def generate_ai_image(prompt, size, quality, model, reference_images=None,
         return await generate_jimeng_provider_image(prompt, size, model, reference_images, provider)
     if is_runninghub_provider(provider):
         return await generate_runninghub_provider_image(prompt, size, model, reference_images, provider)
+    if is_kie_provider(provider):
+        return await generate_kie_provider_image(prompt, size, quality, model, reference_images, provider, aspect_ratio, resolution)
     if effective_protocol(provider, model) == "gemini":
         return await generate_gemini_provider_image(prompt, size, model, reference_images, provider)
     if is_volcengine_provider(provider):
