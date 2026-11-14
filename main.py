@@ -996,7 +996,7 @@ def default_api_providers():
 def merge_default_api_providers(providers, inject_missing=True):
     merged = [dict(item) for item in providers]
     kie_default = next((d for d in default_api_providers() if d["id"] == "kie"), None)
-    if kie_default and not any(item.get("id") == "kie" for item in merged) and inject_missing:
+    if kie_default and not any(item.get("id") == "kie" for item in merged):
         merged.insert(0, kie_default)
     # 强制保留独立入口平台（不再强制 comfly）
     ms_default = next((d for d in default_api_providers() if d["id"] == "modelscope"), None)
