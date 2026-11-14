@@ -5684,6 +5684,15 @@ async def codex_reference_paths(reference_images=None):
                 pass
         raise
 
+async def openai_edit_reference_paths(reference_images=None):
+    """将画布参考图统一转换为 OpenAI 兼容编辑接口可上传的本地文件。
+
+    VIP-GPT 的 GPT Image 图生图使用 multipart /images/edits；它不需要、
+    也不能使用 APIMart 的 /uploads/images 中转。这里同时支持画布本地文件、
+    data URL 和公网 URL，避免某种来源被静默跳过后退化为文生图。
+    """
+    return await codex_reference_paths(reference_images)
+
 def codex_models_payload(raw=None):
     all_models = [*CODEX_DEFAULT_IMAGE_MODELS, *CODEX_DEFAULT_CHAT_MODELS]
     return {
@@ -11617,16 +11626,21 @@ async def generate_ai_image(prompt, size, quality, model, reference_images=None,
             # GPT-Image-2 参考图不能走 /images/generations JSON，否则部分平台会忽略原图或报 Images API unsupported。
             files = []
             opened = []
+            temp_paths = []
             edit_failed_status = None
             edit_failed_text = ""
             try:
-                for ref in image_refs[:ONLINE_IMAGE_REFERENCE_MAX]:
-                    path = output_file_from_url(ref.get("url", ""))
-                    if not path:
-                        continue
+                reference_paths, temp_paths = await openai_edit_reference_paths(
+                    image_refs[:ONLINE_IMAGE_REFERENCE_MAX]
+                )
+                if not reference_paths:
+                    raise HTTPException(status_code=400, detail="没有读取到可上传的参考图片，已取消请求以避免退化为文生图。")
+                for path in reference_paths:
                     fh = open(path, "rb")
                     opened.append(fh)
                     files.append(("image", (os.path.basename(path), fh, content_type_for_path(path))))
+                if is_vip_gpt_provider(provider):
+                    print(f"VIP-GPT 图生图：已向 /images/edits 直接附带 {len(files)} 张参考图片。", flush=True)
                 if mask_refs:
                     mask_path = output_file_from_url(mask_refs[0].get("url", ""))
                     if mask_path:
@@ -11646,6 +11660,11 @@ async def generate_ai_image(prompt, size, quality, model, reference_images=None,
             finally:
                 for fh in opened:
                     fh.close()
+                for path in temp_paths:
+                    try:
+                        os.remove(path)
+                    except OSError:
+                        pass
             # 2) edits 失败 → 非 GPT-Image-2 可回退到 /images/generations + JSON image:[urls/base64]（grsai 风格）
             if response is None:
                 if is_gpt2:
