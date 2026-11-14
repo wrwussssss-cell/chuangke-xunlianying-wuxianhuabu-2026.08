@@ -2393,6 +2393,16 @@ function renderProviderList(){
         const itemProtocol = String(item.protocol || 'openai').toLowerCase();
         const stateClass = item.enabled === false ? 'is-disabled' : (item.has_key || item.has_wallet_key || CLI_PROTOCOLS.has(itemProtocol) ? 'has-key' : 'missing-key');
         const protocolLabel = item.id === 'runninghub' ? 'RH' : String(item.protocol || 'openai').toUpperCase();
+        if(item.id === 'kie'){
+            return `
+                <button class="provider-card provider-card-banner ${active} ${stateClass}" type="button" onclick="selectProvider('${escapeHtml(item.id)}')">
+                    <span class="provider-banner-inner kie-provider-banner-inner">
+                        <span class="kie-brand-mark"><span class="kie-key-mark"><i data-lucide="key-round" class="w-4 h-4"></i></span><span class="kie-wordmark">Kie.ai</span></span>
+                        <span class="kie-provider-label"><strong>Kie.ai</strong><small>AI 图像生成</small></span>
+                    </span>
+                </button>
+            `;
+        }
         if(item.id === 't8'){
             return `
                 <button class="provider-card provider-card-banner ${active} ${stateClass}" type="button" onclick="selectProvider('${escapeHtml(item.id)}')">

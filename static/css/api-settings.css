@@ -40,6 +40,14 @@ html.studio-theme-dark body .provider-card.provider-card-banner.active { box-sha
 .provider-card-banner .runninghub-icon { height:18px; max-width:132px; }
 .provider-card-banner .volcengine-icon { height:22px; max-width:132px; }
 .provider-card-banner .provider-banner-lucide { width:22px; height:22px; color:var(--text); stroke-width:2.2; }
+.provider-card-banner .kie-provider-banner-inner { justify-content:space-between; gap:8px; padding:1px 4px; }
+.kie-brand-mark { display:flex; align-items:center; gap:6px; height:30px; padding:0 9px; border-radius:8px; background:linear-gradient(135deg,#0f172a 0%,#111827 58%,#4338ca 100%); color:#fff; white-space:nowrap; box-shadow:0 5px 12px rgba(30,41,59,.16); }
+.kie-key-mark { display:flex; align-items:center; justify-content:center; width:24px; height:24px; border-radius:7px; background:linear-gradient(135deg,#f8fafc,#c4b5fd); color:#111827; }
+.kie-key-mark svg { width:16px; height:16px; stroke-width:2.4; }
+.kie-wordmark { font-size:12px; font-weight:900; letter-spacing:.1px; }
+.kie-provider-label { display:flex; flex-direction:column; align-items:flex-end; line-height:1.1; color:var(--text); white-space:nowrap; }
+.kie-provider-label strong { font-size:11px; font-weight:850; letter-spacing:.2px; }
+.kie-provider-label small { margin-top:3px; color:var(--muted); font-size:9px; font-weight:700; }
 .provider-card-banner .t8-provider-banner-inner { justify-content:space-between; gap:8px; padding:1px 4px; }
 .t8-brand-mark { display:flex; align-items:center; min-width:0; height:30px; overflow:hidden; border-radius:7px; background:#07090f; }
 .t8-brand-mark img { width:139px; height:30px; max-width:139px; object-fit:cover; object-position:left center; }
