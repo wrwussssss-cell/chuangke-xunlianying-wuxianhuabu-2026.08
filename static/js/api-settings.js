@@ -165,7 +165,8 @@ const RECOMMENDED_APIS = [
         icons:['IMG'],
         summaryKey:'api.recommendKieSummary',
         advantages:['GPT Image 图像生成', '支持图生图参考图', '异步任务接口'],
-        image_models:['gpt-image-2-5-sunburst-text-to-image','gpt-image-2-5-sunburst-image-to-image'],
+        image_models:['gpt-image-2-6','gpt-image-2-5','gpt-image-2'],
+        model_names:{'gpt-image-2-6':'GPT Image 2.6','gpt-image-2-5':'GPT Image 2.5','gpt-image-2':'GPT Image 2'},
         chat_models:[],
         video_models:[]
     },
@@ -3230,6 +3231,10 @@ function runningHubReadableModelName(model, item){
     return raw;
 }
 function modelDisplayName(model, item){
+    if(String(item?.id || '').toLowerCase() === 'kie'){
+        const names = item?.model_names && typeof item.model_names === 'object' ? item.model_names : {};
+        return names[model] || ({'gpt-image-2-6':'GPT Image 2.6','gpt-image-2-5':'GPT Image 2.5','gpt-image-2':'GPT Image 2'}[String(model)] || String(model || ''));
+    }
     return isRunningHubLike(item) ? runningHubReadableModelName(model, item) : String(model || '');
 }
 function providerModelBadge(model, label){

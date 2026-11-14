@@ -489,6 +489,13 @@ CODEX_DEFAULT_IMAGE_MODELS = ["gpt-image-2"]
 CODEX_DEFAULT_CHAT_MODELS = ["gpt-5.5"]
 GEMINI_CLI_DEFAULT_IMAGE_MODELS = ["auto"]
 GEMINI_CLI_DEFAULT_CHAT_MODELS = ["auto"]
+KIE_DEFAULTS_VERSION = 1
+KIE_DEFAULT_IMAGE_MODELS = ["gpt-image-2-6", "gpt-image-2-5", "gpt-image-2"]
+KIE_MODEL_LABELS = {
+    "gpt-image-2-6": "GPT Image 2.6",
+    "gpt-image-2-5": "GPT Image 2.5",
+    "gpt-image-2": "GPT Image 2",
+}
 try:
     CODEX_DEFAULT_TIMEOUT = max(30, min(3600, int(os.getenv("CODEX_CLI_TIMEOUT", "900"))))
 except Exception:
@@ -938,6 +945,8 @@ def default_api_providers():
             "video_models": [],
             "ms_loras": [],
             "ms_defaults_version": 0,
+            "kie_defaults_version": KIE_DEFAULTS_VERSION,
+            "model_names": KIE_MODEL_LABELS,
         },
         {
             "id": "modelscope",
@@ -998,6 +1007,16 @@ def merge_default_api_providers(providers, inject_missing=True):
     kie_default = next((d for d in default_api_providers() if d["id"] == "kie"), None)
     if kie_default and not any(item.get("id") == "kie" for item in merged):
         merged.insert(0, kie_default)
+    current_kie = next((item for item in merged if item.get("id") == "kie"), None)
+    if current_kie:
+        if not current_kie.get("base_url"):
+            current_kie["base_url"] = kie_default["base_url"]
+        current_kie["protocol"] = "kie"
+        current_kie["image_request_mode"] = "kie-async"
+        if int(current_kie.get("kie_defaults_version") or 0) < KIE_DEFAULTS_VERSION:
+            current_kie["image_models"] = KIE_DEFAULT_IMAGE_MODELS[:]
+            current_kie["model_names"] = {**KIE_MODEL_LABELS, **(current_kie.get("model_names") or {})}
+            current_kie["kie_defaults_version"] = KIE_DEFAULTS_VERSION
     # 强制保留独立入口平台（不再强制 comfly）
     ms_default = next((d for d in default_api_providers() if d["id"] == "modelscope"), None)
     if ms_default:
@@ -5090,12 +5109,35 @@ async def tudou_async_reference_images(reference_images):
     return images
 
 def kie_model_for_request(model, has_references):
-    requested = str(model or "").strip() or "gpt-image-2-5-sunburst-text-to-image"
+    requested = str(model or "").strip() or "gpt-image-2-6"
+    family = requested.lower()
+    # The UI stores the three model families allowed by the Kie key. Kie itself
+    # uses a task-specific model id, so resolve the family at request time.
+    family_models = {
+        "gpt-image-2-6": ("gpt-image-2-6/sunburst-text-to-image", "gpt-image-2-6/sunburst-image-to-image"),
+        "gpt-image-2-5": ("gpt-image-2-5-sunburst-text-to-image", "gpt-image-2-5-sunburst-image-to-image"),
+        "gpt-image-2": ("gpt-image-2-text-to-image", "gpt-image-2-image-to-image"),
+    }
+    if family in family_models:
+        return family_models[family][1 if has_references else 0]
     if has_references and requested.endswith("-text-to-image"):
         return requested[:-len("-text-to-image")] + "-image-to-image"
     if not has_references and requested.endswith("-image-to-image"):
         return requested[:-len("-image-to-image")] + "-text-to-image"
     return requested
+
+def kie_models_payload():
+    return {
+        "total": len(KIE_DEFAULT_IMAGE_MODELS),
+        "image_models": KIE_DEFAULT_IMAGE_MODELS[:],
+        "chat_models": [],
+        "video_models": [],
+        "all": KIE_DEFAULT_IMAGE_MODELS[:],
+        "model_names": dict(KIE_MODEL_LABELS),
+        "protocol": "kie",
+        "image_request_mode": "kie-async",
+        "message": "Kie.ai API Key 已限制为 GPT Image 2.6、2.5 和 2。",
+    }
 
 async def kie_upload_reference(client, provider, ref):
     """将画布本地参考图上传到 Kie 临时文件服务，返回可供任务读取的 URL。"""
@@ -14088,6 +14130,24 @@ async def test_provider_connection(payload: TestConnectionPayload):
             "protocol": "runninghub",
             "raw": payload_models.get("raw"),
         }
+    if protocol == "kie":
+        api_key = api_key_from_payload(payload, protocol)
+        if not api_key:
+            raise HTTPException(status_code=400, detail="请先填写或保存 Kie.ai API Key")
+        payload_models = kie_models_payload()
+        return {
+            "ok": True,
+            "status": 200,
+            "message": payload_models["message"],
+            "model_count": payload_models["total"],
+            "image_models": payload_models["image_models"],
+            "chat_models": [],
+            "video_models": [],
+            "all": payload_models["all"],
+            "model_names": payload_models["model_names"],
+            "protocol": "kie",
+            "image_request_mode": "kie-async",
+        }
     base_url = (payload.base_url or "").strip().rstrip("/")
     if not base_url:
         raise HTTPException(status_code=400, detail="请先填写请求地址")
@@ -14343,6 +14403,10 @@ async def fetch_models_from_upstream(base_url: str, api_key: str, protocol: str 
     if protocol == "runninghub":
         provider = {"id": "runninghub", "name": "RunningHub", "base_url": base_url or RUNNINGHUB_DEFAULT_BASE_URL, "protocol": "runninghub", "api_key": api_key}
         return await runninghub_models_payload(provider)
+    if protocol == "kie":
+        if not (api_key or "").strip():
+            raise HTTPException(status_code=400, detail="请先填写或保存 Kie.ai API Key")
+        return kie_models_payload()
     base_url = (base_url or "").strip().rstrip("/")
     if not base_url:
         raise HTTPException(status_code=400, detail="请先填写请求地址")
