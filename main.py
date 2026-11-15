@@ -3252,6 +3252,9 @@ class CanvasSaveRequest(BaseModel):
     logs: List[Dict[str, Any]] = []
     settings: Dict[str, Any] = {}
     client_id: str = ""
+
+class CanvasAssetPromptUpdate(BaseModel):
+    prompt: str = Field(default="", max_length=ONLINE_IMAGE_PROMPT_MAX_LENGTH)
     base_updated_at: int = 0
 
 class CanvasAssetCheckRequest(BaseModel):
@@ -4069,12 +4072,25 @@ def canvas_node_title(node):
         return ""
     return str(node.get("title") or node.get("name") or node.get("label") or node.get("type") or "节点")[:120]
 
+def canvas_node_prompt(node):
+    if not isinstance(node, dict):
+        return ""
+    for container in (node, node.get("data"), node.get("config"), node.get("params"), node.get("settings")):
+        if not isinstance(container, dict):
+            continue
+        for key in ("prompt", "positive_prompt", "prompt_text", "promptText"):
+            value = str(container.get(key) or "").strip()
+            if value:
+                return value[:ONLINE_IMAGE_PROMPT_MAX_LENGTH]
+    return ""
+
 def extract_canvas_assets(canvas):
     record = canvas_record(canvas)
     canvas_id = str(record.get("id") or "")
     items = []
     seen = set()
     nodes = canvas.get("nodes") if isinstance(canvas.get("nodes"), list) else []
+    saved_prompts = canvas.get("asset_prompts") if isinstance(canvas.get("asset_prompts"), dict) else {}
     for node_index, node in enumerate(nodes):
         if not isinstance(node, dict):
             continue
@@ -4107,6 +4123,7 @@ def extract_canvas_assets(canvas):
                 "node_type": str(node.get("type") or ""),
                 "source_path": field_path,
                 "created_at": node.get("created_at") or record.get("updated_at") or record.get("created_at") or 0,
+                "prompt": str(saved_prompts.get(url) or saved_prompts.get(node_id) or canvas_node_prompt(node) or "")[:ONLINE_IMAGE_PROMPT_MAX_LENGTH],
             }
             if isinstance(raw, dict):
                 for key in ("natural_w", "natural_h", "width", "height", "size", "duration", "runMs"):
@@ -16760,6 +16777,23 @@ async def list_canvas_assets():
     # canvas_assets_index 会同步遍历并解析所有画布 JSON，放进线程池避免阻塞事件循环
     # （否则画布多时一次请求就会卡住整个 asyncio loop，连 WebSocket 一起掉线）。
     return await asyncio.to_thread(canvas_assets_index)
+
+@app.patch("/api/canvas-assets/{asset_id}/prompt")
+async def update_canvas_asset_prompt(asset_id: str, payload: CanvasAssetPromptUpdate):
+    index = await asyncio.to_thread(canvas_assets_index)
+    item = next((entry for entry in index.get("items", []) if entry.get("id") == asset_id), None)
+    if not item:
+        raise HTTPException(status_code=404, detail="画布资产不存在")
+    canvas = load_canvas(item.get("canvas_id") or "")
+    prompts = canvas.get("asset_prompts") if isinstance(canvas.get("asset_prompts"), dict) else {}
+    prompt = str(payload.prompt or "").strip()
+    if prompt:
+        prompts[item.get("url") or asset_id] = prompt
+    else:
+        prompts.pop(item.get("url") or asset_id, None)
+    canvas["asset_prompts"] = prompts
+    save_canvas(canvas)
+    return {"ok": True, "asset_id": asset_id, "prompt": prompt}
 
 @app.get("/api/smart-canvas/prompt-templates")
 async def smart_canvas_prompt_templates():

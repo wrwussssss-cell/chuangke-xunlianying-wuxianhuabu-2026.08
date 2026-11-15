@@ -1528,10 +1528,38 @@ function renderCanvasAssetDetail(item){
                     <div class="detail-meta"><span>来源节点</span><strong title="${escapeAttr(item.node_title || item.node_type || '')}">${escapeHtml(item.node_title || item.node_type || '节点')}</strong></div>
                     <div class="detail-meta"><span>节点类型</span><strong>${escapeHtml(item.node_type || '-')}</strong></div>
                 </div>
+                <div class="detail-caption-card canvas-asset-prompt-card">
+                    <div class="detail-caption-head">
+                        <strong>对应提示词</strong>
+                        <div class="detail-caption-actions">
+                            <button class="asset-btn primary" type="button" data-canvas-asset-prompt-save="${escapeAttr(item.id)}"><i data-lucide="save"></i><span>保存提示词</span></button>
+                        </div>
+                    </div>
+                    <textarea id="canvasAssetPromptEdit" class="detail-caption-textarea" placeholder="把生成或编辑这张图片时使用的提示词放在这里…">${escapeHtml(item.prompt || '')}</textarea>
+                    <div class="detail-caption-hint">提示词会和这张画布资产一起保存，方便以后查找和复用。</div>
+                </div>
                 <div class="detail-url">${escapeHtml(item.url || '')}</div>
             </div>
         </div>
     `;
+}
+async function saveCanvasAssetPrompt(id){
+    const item = findCanvasAssetItem(id);
+    if(!item) return;
+    const textarea = document.getElementById('canvasAssetPromptEdit');
+    const prompt = textarea ? textarea.value : (item.prompt || '');
+    try {
+        const data = await apiJson(`/api/canvas-assets/${encodeURIComponent(id)}/prompt`, {
+            method:'PATCH',
+            headers:{'Content-Type':'application/json'},
+            body:JSON.stringify({prompt})
+        });
+        item.prompt = data.prompt || '';
+        setStatus('已保存这张图片的提示词');
+        refreshCanvasAssetSelectionOnly();
+    } catch(err){
+        setStatus(err.message || '保存提示词失败');
+    }
 }
 function refreshCanvasAssetSelectionOnly(){
     document.querySelectorAll('[data-canvas-asset-card]').forEach(card => {
@@ -3422,6 +3450,8 @@ async function handleClick(event){
     if(target.closest?.('[data-canvas-asset-download-selected]')){ await downloadCanvasAssetItems([...selectedCanvasAssetIds]); return; }
     const canvasAssetDownload = target.closest?.('[data-canvas-asset-download]');
     if(canvasAssetDownload){ await downloadCanvasAssetItems([canvasAssetDownload.dataset.canvasAssetDownload || '']); return; }
+    const canvasAssetPromptSave = target.closest?.('[data-canvas-asset-prompt-save]');
+    if(canvasAssetPromptSave){ await saveCanvasAssetPrompt(canvasAssetPromptSave.dataset.canvasAssetPromptSave || ''); return; }
     const canvasAssetOpen = target.closest?.('[data-canvas-asset-open]');
     if(canvasAssetOpen){ const it = findCanvasAssetItem(canvasAssetOpen.dataset.canvasAssetOpen || ''); if(it?.url) window.open(it.url, '_blank', 'noopener'); return; }
     const canvasAssetCopy = target.closest?.('[data-canvas-asset-copy]');
