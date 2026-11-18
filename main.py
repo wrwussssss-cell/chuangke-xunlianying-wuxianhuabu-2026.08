@@ -5160,7 +5160,10 @@ async def kie_upload_reference(client, provider, ref):
     """将画布本地参考图上传到 Kie 临时文件服务，返回可供任务读取的 URL。"""
     value = str((ref or {}).get("url") or "").strip()
     path = output_file_from_url(value)
-    headers = api_headers(provider=provider)
+    # `files=` lets httpx build the multipart boundary and Content-Type.
+    # Do not reuse the JSON default here, otherwise Kie treats the request as
+    # a JSON upload and responds with "Please use multipart/form-data".
+    headers = api_headers(json_body=False, provider=provider)
     upload_url = "https://kieai.redpandaai.co/api/file-stream-upload"
     if path and os.path.isfile(path):
         with open(path, "rb") as fh:
