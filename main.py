@@ -367,6 +367,7 @@ WORKFLOW_DIR = os.path.join(BASE_DIR, "workflows")
 WORKFLOW_PATH = os.path.join(WORKFLOW_DIR, "Z-Image.json")
 STATIC_DIR = os.path.join(BASE_DIR, "static")
 TRAINING_CAMP_KIE_ID = "kie-training-camp"
+TRAINING_CAMP_KIE_PUBLIC_KEY_REL = "static/training-camp-kie-key.txt"
 TRAINING_CAMP_KIE_PUBLIC_KEY_PATH = os.path.join(STATIC_DIR, "training-camp-kie-key.txt")
 STATIC_RUNNINGHUB_DIR = os.path.join(STATIC_DIR, "runninghub")
 STATIC_RUNNINGHUB_THUMBNAIL_DIR = os.path.join(STATIC_RUNNINGHUB_DIR, "thumbnails")
@@ -381,6 +382,9 @@ LOCAL_UPLOAD_DIR = os.path.join(ASSETS_DIR, "uploads")
 HISTORY_FILE = os.path.join(RUNTIME_DIR, "history.json")
 API_ENV_FILE = os.path.join(RUNTIME_DIR, "API", ".env")
 DATA_DIR = os.path.join(RUNTIME_DIR, "data")
+TRAINING_CAMP_KIE_KEY_CACHE = os.path.join(DATA_DIR, "training-camp-kie-key.txt")
+TRAINING_CAMP_KIE_KEY_LOCK = Lock()
+_training_camp_key_retry_at = 0.0
 CONVERSATION_DIR = os.path.join(DATA_DIR, "conversations")
 CANVAS_DIR = os.path.join(DATA_DIR, "canvases")
 MEDIA_PREVIEW_DIR = os.path.join(DATA_DIR, "media_previews")
@@ -895,13 +899,46 @@ def read_api_env_value(key: str) -> str:
         return ""
     return ""
 
-def training_camp_kie_public_key() -> str:
+def parse_training_camp_kie_public_key(text: str) -> str:
+    key = text.strip()
+    return key if re.fullmatch(r"[!-~]{12,512}", key) else ""
+
+def read_training_camp_kie_public_key(path: str) -> str:
     try:
-        with open(TRAINING_CAMP_KIE_PUBLIC_KEY_PATH, "r", encoding="utf-8-sig") as f:
-            key = f.read(1024).strip()
+        with open(path, "r", encoding="utf-8-sig") as f:
+            return parse_training_camp_kie_public_key(f.read(1024))
     except (OSError, UnicodeError):
         return ""
-    return key if re.fullmatch(r"[!-~]{12,512}", key) else ""
+
+def training_camp_kie_public_key() -> str:
+    return (read_training_camp_kie_public_key(TRAINING_CAMP_KIE_PUBLIC_KEY_PATH)
+            or read_training_camp_kie_public_key(TRAINING_CAMP_KIE_KEY_CACHE))
+
+def ensure_training_camp_kie_public_key(*, refresh=False) -> str:
+    global _training_camp_key_retry_at
+    key = training_camp_kie_public_key()
+    if key and not refresh:
+        return key
+    with TRAINING_CAMP_KIE_KEY_LOCK:
+        key = training_camp_kie_public_key()
+        if not refresh and (key or time.monotonic() < _training_camp_key_retry_at):
+            return key
+        url = MODELSCOPE_FILE_API_ROOT + TRAINING_CAMP_KIE_PUBLIC_KEY_REL
+        try:
+            response = github_get(url, headers={"User-Agent": "Infinite-Canvas-Updater"}, timeout=5)
+            remote_key = parse_training_camp_kie_public_key(response.content.decode("utf-8-sig"))
+            if not remote_key:
+                return key
+            os.makedirs(os.path.dirname(TRAINING_CAMP_KIE_KEY_CACHE), exist_ok=True)
+            temp_path = f"{TRAINING_CAMP_KIE_KEY_CACHE}.tmp"
+            with open(temp_path, "w", encoding="utf-8") as f:
+                f.write(remote_key + "\n")
+            os.replace(temp_path, TRAINING_CAMP_KIE_KEY_CACHE)
+            return remote_key
+        except (OSError, UnicodeError):
+            return key
+        finally:
+            _training_camp_key_retry_at = time.monotonic() + 60
 
 def provider_env_key_value(provider_id: str) -> str:
     provider_id = str(provider_id or "").strip().lower()
@@ -1146,7 +1183,7 @@ def merge_default_api_providers(providers, inject_missing=True):
         current["image_models"] = model_list_from_values([*image_models, *default_image_models])
         current["chat_models"] = model_list_from_values([*(current.get("chat_models") or []), *default_chat_models])
         current["video_models"] = []
-    preferred_ids = ["kie", "t8", "modelscope", "runninghub", "custom-api", "autodl", "vip-gpt"]
+    preferred_ids = ["kie", TRAINING_CAMP_KIE_ID, "t8", "modelscope", "runninghub", "custom-api", "autodl", "vip-gpt"]
     preferred_rank = {provider_id: index for index, provider_id in enumerate(preferred_ids)}
     known = [item for item in merged if item.get("id") in preferred_rank]
     unknown = [item for item in merged if item.get("id") not in preferred_rank]
@@ -2074,6 +2111,7 @@ def app_info():
     version = current_app_version()
     return {
         "version": version,
+        "instance_id": CLIENT_ID,
         "repo_url": GITHUB_REPO_URL,
         "version_url": GITHUB_VERSION_URL,
         "tree_url": GITHUB_TREE_URL,
@@ -2576,6 +2614,13 @@ def stage_update_from_source(source: str, staging_root: str) -> Tuple[List[str],
         return staged_update_file_list(staging_root)
     root_files, static_files, files = github_update_file_list()
     download_github_update_files(files, staging_root)
+    key = ensure_training_camp_kie_public_key(refresh=True)
+    if key and TRAINING_CAMP_KIE_PUBLIC_KEY_REL not in static_files:
+        staged_key = os.path.join(staging_root, TRAINING_CAMP_KIE_PUBLIC_KEY_REL)
+        with open(staged_key, "w", encoding="utf-8") as f:
+            f.write(key + "\n")
+        static_files.append(TRAINING_CAMP_KIE_PUBLIC_KEY_REL)
+        files.append(TRAINING_CAMP_KIE_PUBLIC_KEY_REL)
     return root_files, static_files, files
 
 def validate_staged_update(staging_root: str, root_files: List[str], static_files: List[str]) -> None:
@@ -2867,6 +2912,7 @@ def update_from_github(req: UpdateRequest = UpdateRequest()):
             "pruned_backups": pruned_backups,
             "restart_required": True,
             "restart_scheduled": restart_scheduled,
+            "instance_id": CLIENT_ID,
         }
     except HTTPException:
         raise
@@ -3019,6 +3065,7 @@ def rollback_update(req: RollbackRequest):
             "pruned_backups": pruned_backups,
             "restart_required": True,
             "restart_scheduled": restart_scheduled,
+            "instance_id": CLIENT_ID,
         }
     except HTTPException:
         raise
@@ -3308,10 +3355,13 @@ class CanvasSaveRequest(BaseModel):
     logs: List[Dict[str, Any]] = []
     settings: Dict[str, Any] = {}
     client_id: str = ""
+    base_updated_at: int = 0
 
 class CanvasAssetPromptUpdate(BaseModel):
     prompt: str = Field(default="", max_length=ONLINE_IMAGE_PROMPT_MAX_LENGTH)
-    base_updated_at: int = 0
+
+class CanvasAssetDeleteRequest(BaseModel):
+    ids: List[str]
 
 class CanvasAssetCheckRequest(BaseModel):
     urls: List[str] = []
@@ -4188,7 +4238,41 @@ def extract_canvas_assets(canvas):
             items.append(item)
     return items
 
+def canvas_asset_removals_path():
+    return os.path.join(canvas_user_dir(), ".canvas-assets", "removed.json")
+
+
+def load_canvas_asset_removals(path):
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return set(json.load(f))
+    except FileNotFoundError:
+        return set()
+
+
+def remove_canvas_assets(asset_ids):
+    requested = set(asset_ids)
+    if not requested:
+        return 0
+    visible = {item["id"] for item in canvas_assets_index()["items"]}
+    candidates = requested & visible
+    if not candidates:
+        return 0
+    path = canvas_asset_removals_path()
+    with CANVAS_LOCK:
+        removed = load_canvas_asset_removals(path)
+        newly_removed = candidates - removed
+        if newly_removed:
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            temporary_path = path + ".tmp"
+            with open(temporary_path, "w", encoding="utf-8") as f:
+                json.dump(sorted(removed | newly_removed), f)
+            os.replace(temporary_path, path)
+    return len(newly_removed)
+
+
 def canvas_assets_index():
+    removed = load_canvas_asset_removals(canvas_asset_removals_path())
     canvases = []
     items = []
     canvas_counts = {"all": 0, "smart": 0, "classic": 0}
@@ -4203,7 +4287,7 @@ def canvas_assets_index():
         if canvas.get("deleted_at"):
             continue
         record = canvas_record(canvas)
-        canvas_items = extract_canvas_assets(canvas)
+        canvas_items = [item for item in extract_canvas_assets(canvas) if item["id"] not in removed]
         record["asset_count"] = len(canvas_items)
         canvases.append(record)
         items.extend(canvas_items)
@@ -13847,7 +13931,9 @@ async def jimeng_query_media(payload: JimengQueryMediaRequest):
         return {"status": "failed", "submit_id": submit_id, "kind": kind, "error": str(getattr(exc, "detail", "") or exc)}
 
 @app.get("/api/config")
-async def ai_config():
+async def ai_config(response: Response):
+    response.headers["Cache-Control"] = "no-store"
+    await asyncio.to_thread(ensure_training_camp_kie_public_key)
     preferred_chat_model = next((m for m in CHAT_MODELS if m == "gpt-5.5"), CHAT_MODELS[0] if CHAT_MODELS else CHAT_MODEL)
     providers = public_api_providers()
     return {
@@ -13870,6 +13956,7 @@ async def ai_models():
 
 @app.get("/api/providers")
 async def api_providers():
+    await asyncio.to_thread(ensure_training_camp_kie_public_key)
     return {"providers": public_api_providers()}
 
 @app.put("/api/providers")
@@ -16862,6 +16949,11 @@ async def list_canvas_assets():
     # canvas_assets_index 会同步遍历并解析所有画布 JSON，放进线程池避免阻塞事件循环
     # （否则画布多时一次请求就会卡住整个 asyncio loop，连 WebSocket 一起掉线）。
     return await asyncio.to_thread(canvas_assets_index)
+
+@app.post("/api/canvas-assets/delete")
+async def delete_canvas_assets(payload: CanvasAssetDeleteRequest):
+    return {"removed": await asyncio.to_thread(remove_canvas_assets, payload.ids)}
+
 
 @app.patch("/api/canvas-assets/{asset_id}/prompt")
 async def update_canvas_asset_prompt(asset_id: str, payload: CanvasAssetPromptUpdate):

@@ -2680,7 +2680,7 @@
                 document.getElementById('github-entry-btn')?.classList.remove('update-available');
                 btn?.classList.remove('show');
                 setProjectVersionBadge(data.version || document.getElementById('github-entry-btn')?.dataset.remoteVersion || appInfo.version);
-                if(restarting) waitForBackendAndReload();
+                if(restarting) waitForBackendAndReload(data.instance_id || appInfo.instance_id);
             } catch(e) {
                 const msg = (e && e.name === 'AbortError')
                     ? (isEn ? 'Update timed out. Switch source or check your network, then retry.' : '更新超时。请切换下载源或检查网络后重试。')
@@ -2697,14 +2697,21 @@
                 refreshUpdateButtonText();
             }
         }
-        async function waitForBackendAndReload() {
+        async function waitForBackendAndReload(previousInstance) {
             const deadline = Date.now() + 90 * 1000;
+            let disconnected = false;
             await new Promise(r => setTimeout(r, 4000));
             while(Date.now() < deadline) {
                 try {
-                    const r = await fetch('/api/app-info', { cache:'no-store' });
-                    if(r.ok) { location.reload(); return; }
-                } catch {}
+                    const response = await fetch('/api/app-info', { cache:'no-store' });
+                    if(response.ok) {
+                        const info = await response.json();
+                        const restarted = info.instance_id ? info.instance_id !== previousInstance : disconnected;
+                        if(restarted) { location.reload(); return; }
+                    }
+                } catch {
+                    disconnected = true;
+                }
                 await new Promise(r => setTimeout(r, 1500));
             }
         }
@@ -2746,7 +2753,7 @@
                 alert(isEn
                     ? `Restored ${data.count || 0} files. A safety restore point was created, and the backend is restarting.`
                     : `已还原 ${data.count || 0} 个文件，当前版本已自动保存为新的恢复点。后端正在重启。`);
-                if(data.restart_scheduled) waitForBackendAndReload();
+                if(data.restart_scheduled) waitForBackendAndReload(data.instance_id || appInfo.instance_id);
             } catch(e) {
                 alert((isEn ? 'Rollback failed: ' : '回滚失败：') + describeNetworkError(e, isEn));
             }

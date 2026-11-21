@@ -107,6 +107,7 @@ let selectedCanvasAssetIds = new Set();
 let canvasAssetQuery = '';
 let canvasAssetSort = 'canvas_asc';
 let canvasAssetManageMode = false;
+let canvasAssetDeletePending = false;
 let searchCompositionActive = false;
 let searchRenderTimer = null;
 let lastSearchCompositionEndAt = 0;
@@ -1291,7 +1292,28 @@ function normalizeCanvasAssetState(){
     if(!selectedCanvasAssetId && items.length) selectedCanvasAssetId = items[0].id;
     selectedCanvasAssetIds = new Set([...selectedCanvasAssetIds].filter(id => findCanvasAssetItem(id)));
 }
-async function refreshCanvasAssets(){
+async function deleteSelectedCanvasAssets(){
+    const ids = [...selectedCanvasAssetIds];
+    if(!ids.length || canvasAssetDeletePending) return;
+    if(!window.confirm(`从素材管理删除选中的 ${ids.length} 个画布资产？原画布的节点和文件会保留。`)) return;
+    canvasAssetDeletePending = true;
+    render();
+    try {
+        const data = await apiJson('/api/canvas-assets/delete', {
+            method:'POST',
+            headers:{'Content-Type':'application/json'},
+            body:JSON.stringify({ids}),
+        });
+        ids.forEach(id => selectedCanvasAssetIds.delete(id));
+        await refreshCanvasAssets(`已从列表删除 ${data.removed || 0} 个画布资产`);
+    } catch(err) {
+        setStatus(err.message || '删除画布资产失败');
+    } finally {
+        canvasAssetDeletePending = false;
+        render();
+    }
+}
+async function refreshCanvasAssets(successMessage='画布资产已刷新'){
     try {
         setStatus('正在刷新画布资产...');
         const data = await apiJson('/api/canvas-assets');
@@ -1302,7 +1324,7 @@ async function refreshCanvasAssets(){
         };
         normalizeCanvasAssetState();
         render();
-        setStatus('画布资产已刷新');
+        setStatus(successMessage);
     } catch(err) {
         setStatus(err.message || '刷新画布资产失败');
     }
@@ -1425,10 +1447,11 @@ function renderCanvasAssetsManager(){
                 </div>
             </div>
             <div class="manage-tools">
-                <span>已选择 ${selectedCanvasAssetIds.size} 个画布资产，支持拖拽框选或逐个勾选。</span>
+                <span data-canvas-asset-selection-summary>已选择 ${selectedCanvasAssetIds.size} 个画布资产，支持拖拽框选或逐个勾选。</span>
                 <div class="asset-tools">
                     <button class="asset-btn" type="button" data-canvas-asset-select-all ${items.length ? '' : 'disabled'}><i data-lucide="check-square"></i><span>全选</span></button>
                     <button class="asset-btn" type="button" data-canvas-asset-clear-selection ${selectedCanvasAssetIds.size ? '' : 'disabled'}><i data-lucide="square"></i><span>清空</span></button>
+                    <button class="asset-btn danger" type="button" data-canvas-asset-delete-selected ${selectedCanvasAssetIds.size && !canvasAssetDeletePending ? '' : 'disabled'}><i data-lucide="trash-2"></i><span>删除所选</span></button>
                     <button class="asset-btn primary" type="button" data-canvas-asset-download-selected ${selectedCanvasAssetIds.size ? '' : 'disabled'}><i data-lucide="download"></i><span>下载所选</span></button>
                 </div>
             </div>
@@ -1534,6 +1557,14 @@ function renderCanvasAssetDetail(item){
     `;
 }
 function refreshCanvasAssetSelectionOnly(){
+    const count = selectedCanvasAssetIds.size;
+    const summary = root.querySelector('[data-canvas-asset-selection-summary]');
+    if(summary) summary.textContent = `已选择 ${count} 个画布资产，支持拖拽框选或逐个勾选。`;
+    root.querySelectorAll('[data-canvas-asset-clear-selection], [data-canvas-asset-download-selected]').forEach(button => {
+        button.disabled = !count;
+    });
+    const deleteButton = root.querySelector('[data-canvas-asset-delete-selected]');
+    if(deleteButton) deleteButton.disabled = !count || canvasAssetDeletePending;
     document.querySelectorAll('[data-canvas-asset-card]').forEach(card => {
         card.classList.toggle('active', card.dataset.canvasAssetCard === selectedCanvasAssetId);
     });
@@ -3420,6 +3451,7 @@ async function handleClick(event){
     if(target.closest?.('[data-canvas-asset-select-all]')){ currentCanvasAssetItems().forEach(item => selectedCanvasAssetIds.add(item.id)); render(); return; }
     if(target.closest?.('[data-canvas-asset-clear-selection]')){ selectedCanvasAssetIds.clear(); render(); return; }
     if(target.closest?.('[data-canvas-asset-download-selected]')){ await downloadCanvasAssetItems([...selectedCanvasAssetIds]); return; }
+    if(target.closest?.('[data-canvas-asset-delete-selected]')){ await deleteSelectedCanvasAssets(); return; }
     const canvasAssetDownload = target.closest?.('[data-canvas-asset-download]');
     if(canvasAssetDownload){ await downloadCanvasAssetItems([canvasAssetDownload.dataset.canvasAssetDownload || '']); return; }
     const canvasAssetOpen = target.closest?.('[data-canvas-asset-open]');

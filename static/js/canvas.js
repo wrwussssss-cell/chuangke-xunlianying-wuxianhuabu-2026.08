@@ -1530,7 +1530,7 @@ async function saveCanvas(){
 async function loadConfig(){
     loadLocalModelLists();
     try {
-        const cfg = await fetch('/api/config').then(r=>r.json());
+        const cfg = await fetch('/api/config', {cache:'no-store'}).then(r=>r.json());
         imageModels = cfg.image_models?.length ? cfg.image_models : imageModels;
         chatModels = cfg.chat_models?.length ? cfg.chat_models : chatModels;
         videoModels = cfg.video_models?.length ? cfg.video_models : DEFAULT_VIDEO_MODELS;
