@@ -1631,7 +1631,7 @@
                 <div class="author-content-wrap">
                     <div class="author-name-lite">AI创客训练营</div>
                     <div class="social-row-lite">
-                        <a href="https://www.bilibili.com/video/BV1q7nE6KEsQ/?spm_id_from=333.1387.homepage.video_card.click" target="_blank" rel="noopener noreferrer" class="social-icon-lite">
+                        <a href="https://www.bilibili.com/video/BV1q7nE6KEsQ/?vd_source=49d3ba09ac7556493e1f73da615cbd54" target="_blank" rel="noopener noreferrer" aria-label="Bilibili" class="social-icon-lite">
                             <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
                                 <path d="M17.813 4.653h-.854L15.66 3.053a1.147 1.147 0 00-1.63 0l-1.3 1.6h-1.46L9.97 3.053a1.147 1.147 0 00-1.63 0L7.043 4.653h-.854a3.946 3.946 0 00-3.93 3.934v8.117a3.946 3.946 0 003.93 3.934h11.624a3.946 3.946 0 003.93-3.934V8.587a3.946 3.946 0 00-3.93-3.934zM7.152 13.9a1.465 1.465 0 111.47-1.462 1.465 1.465 0 01-1.47 1.462zm7.696 0a1.465 1.465 0 111.47-1.462 1.465 1.465 0 01-1.47 1.462z" />
                             </svg>
@@ -1795,7 +1795,7 @@
         const PAGE_IDS = ['zimage','enhance','klein','angle','online','gpt-chat','canvas','asset-manager','api-settings','comfyui-settings'];
         const LOCAL_PAGE_IDS = ['zimage','enhance','klein','angle'];
         const PROJECT_URL = 'https://github.com/wrwussssss-cell/chuangke-xunlianying-wuxianhuabu-2026.08';
-        let appInfo = { version:'', repo_url:PROJECT_URL, version_url:'https://raw.githubusercontent.com/wrwussssss-cell/chuangke-xunlianying-wuxianhuabu-2026.08/main/VERSION' };
+        let appInfo = { version:'', repo_url:PROJECT_URL, version_url:'https://raw.githubusercontent.com/wrwussssss-cell/chuangke-xunlianying-wuxianhuabu-2026.08/main/mac/VERSION' };
         let updateConnectivityResult = null;
         let projectUpdateRunning = false;
         let projectUpdateAbort = null;  // 当前更新请求的 AbortController，便于用户中途取消
@@ -2342,11 +2342,11 @@
             const github = sources.github || {};
             const ms = sources.modelscope || {};
             return [
-                { name:'GitHub 更新列表', url:github.tree_url || appInfo.tree_url || 'https://api.github.com/repos/hero8152/Infinite-Canvas/git/trees/main?recursive=1', source:'github', required:true },
-                { name:'GitHub 版本文件', url:github.version_url || appInfo.version_url || 'https://raw.githubusercontent.com/hero8152/Infinite-Canvas/main/VERSION', source:'github', required:true },
+                { name:'GitHub 更新列表', url:github.tree_url || appInfo.tree_url || 'https://api.github.com/repos/wrwussssss-cell/chuangke-xunlianying-wuxianhuabu-2026.08/git/trees/main?recursive=1', source:'github', required:true },
+                { name:'GitHub 版本文件', url:github.version_url || appInfo.version_url || 'https://raw.githubusercontent.com/wrwussssss-cell/chuangke-xunlianying-wuxianhuabu-2026.08/main/mac/VERSION', source:'github', required:true },
                 { name:'GitHub 主页', url:'https://github.com/', source:'github' },
-                { name:'ModelScope 版本文件', url:ms.version_url || 'https://www.modelscope.cn/api/v1/studio/Daniel8152/Infinite-Canvas/repo?Revision=master&FilePath=VERSION', source:'modelscope', required:true },
-                { name:'ModelScope 空间页面', url:ms.repo_url || 'https://modelscope.cn/studios/Daniel8152/Infinite-Canvas', source:'modelscope' },
+                { name:'ModelScope 版本文件', url:ms.version_url || 'https://www.modelscope.cn/api/v1/studio/wrwussssss/11chuangkexunlianying-wuxianhuabu/repo?Revision=master&FilePath=mac/VERSION', source:'modelscope', required:true },
+                { name:'ModelScope 空间页面', url:ms.repo_url || 'https://www.modelscope.cn/studios/wrwussssss/11chuangkexunlianying-wuxianhuabu', source:'modelscope' },
                 { name:'ModelScope 主页', url:'https://modelscope.cn/', source:'modelscope' },
                 { name:'Google 连通性', url:'https://www.google.com/generate_204', source:'reference' },
             ];
@@ -2653,7 +2653,7 @@
                 const res = await fetch('/api/update-from-github', {
                     method:'POST',
                     headers:{'Content-Type':'application/json'},
-                    body:JSON.stringify({ auto_restart:true, restart_delay:3, source:updateSource, fallback:true }),
+                    body:JSON.stringify({ auto_restart:true, restart_delay:3, source:updateSource, fallback:updateSource !== 'modelscope' }),
                     signal:ac.signal
                 });
                 const data = await res.json().catch(() => ({}));

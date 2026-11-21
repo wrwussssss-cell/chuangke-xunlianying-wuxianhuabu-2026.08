@@ -152,23 +152,30 @@ let rhEditorMode = 'workflow';
 let recommendInlineOpen = false;
 let providerDragId = '';
 // category: 'allround'（全能）| 'value'（性价比）| 'free'（免费），推荐面板按分组分节展示
+const KIE_RECOMMENDATION = {
+    id:'kie',
+    name:'Kie.ai',
+    category:'allround',
+    base_url:'https://api.kie.ai',
+    protocol:'kie',
+    image_request_mode:'kie-async',
+    register_url:'https://kie.ai/api-key',
+    tagKeys:['api.tagImageModels','api.tagImageToImage'],
+    icons:['IMG'],
+    summaryKey:'api.recommendKieSummary',
+    advantages:['GPT Image 图像生成', '支持图生图参考图', '异步任务接口'],
+    image_models:['gpt-image-2-6','gpt-image-2-5','gpt-image-2'],
+    model_names:{'gpt-image-2-6':'GPT Image 2.6','gpt-image-2-5':'GPT Image 2.5','gpt-image-2':'GPT Image 2'},
+    chat_models:[],
+    video_models:[]
+};
 const RECOMMENDED_APIS = [
+    KIE_RECOMMENDATION,
     {
-        id:'kie',
-        name:'Kie.ai',
-        category:'allround',
-        base_url:'https://api.kie.ai',
-        protocol:'kie',
-        image_request_mode:'kie-async',
-        register_url:'https://kie.ai/api-key',
-        tagKeys:['api.tagImageModels','api.tagImageToImage'],
-        icons:['IMG'],
-        summaryKey:'api.recommendKieSummary',
-        advantages:['GPT Image 图像生成', '支持图生图参考图', '异步任务接口'],
-        image_models:['gpt-image-2-6','gpt-image-2-5','gpt-image-2'],
-        model_names:{'gpt-image-2-6':'GPT Image 2.6','gpt-image-2-5':'GPT Image 2.5','gpt-image-2':'GPT Image 2'},
-        chat_models:[],
-        video_models:[]
+        ...KIE_RECOMMENDATION,
+        id:'kie-training-camp',
+        name:'训练营内部端口',
+        summaryKey:'api.recommendTrainingCampSummary'
     },
     {
         id:'t8',
@@ -820,7 +827,9 @@ function syncEditor(){
     // 固定平台不从协议下拉读取
     item.protocol = selectedProtocol;
     item.image_request_mode = normalizeImageRequestMode(
-        item.id === 'kie' || item.id === 'modelscope' || item.id === 'runninghub' || item.id === 'volcengine' || CLI_PROTOCOLS.has(selectedProtocol)
+        selectedProtocol === 'kie'
+            ? 'kie-async'
+            : item.id === 'modelscope' || item.id === 'runninghub' || item.id === 'volcengine' || CLI_PROTOCOLS.has(selectedProtocol)
             ? 'openai'
             : lockedApi
             ? lockedApi.image_request_mode
@@ -867,6 +876,7 @@ function updateProtocolFromInput(){
     }
     const value = String(protocolInput.value || 'openai').toLowerCase();
     item.protocol = API_PROTOCOLS.includes(value) ? value : 'openai';
+    if(item.protocol === 'kie') item.image_request_mode = 'kie-async';
     if(CLI_PROTOCOLS.has(item.protocol)) item.base_url = '';
     applyCliProtocolDefaults(item, item.protocol);
     document.body.classList.toggle('show-jimeng', item.protocol === 'jimeng');
@@ -2525,7 +2535,7 @@ function renderEditor(){
     if(imageRequestModeInput){
         const requestedMode = normalizeImageRequestMode(item.image_request_mode);
         imageRequestModeInput.value = requestedMode;
-        imageRequestModeInput.disabled = Boolean(lockedApi) || item.id === 'modelscope' || item.id === 'runninghub' || item.id === 'volcengine' || CLI_PROTOCOLS.has(String(protocolInput?.value || item.protocol || '').toLowerCase());
+        imageRequestModeInput.disabled = Boolean(lockedApi) || item.protocol === 'kie' || item.id === 'modelscope' || item.id === 'runninghub' || item.id === 'volcengine' || CLI_PROTOCOLS.has(String(protocolInput?.value || item.protocol || '').toLowerCase());
         imageRequestModeInput.title = lockedApi ? '推荐平台使用固定图片协议' : '';
     }
     if(imageEditRouteInput){
@@ -2914,6 +2924,7 @@ function imageRequestModeLabel(mode){
     if(normalized === 'openai-json') return 'OpenAI JSON';
     if(normalized === 'openai-video-proxy') return 'OpenAI 中转';
     if(normalized === 'openai-responses') return 'OpenAI RS';
+    if(normalized === 'kie-async') return 'Kie.ai 异步';
     if(normalized === 'tudou-async') return '土豆 GPT-Image-2 异步';
     return 'OpenAI 标准';
 }
@@ -3231,7 +3242,7 @@ function runningHubReadableModelName(model, item){
     return raw;
 }
 function modelDisplayName(model, item){
-    if(String(item?.id || '').toLowerCase() === 'kie'){
+    if(item?.protocol === 'kie' || item?.id === 'kie'){
         const names = item?.model_names && typeof item.model_names === 'object' ? item.model_names : {};
         return names[model] || ({'gpt-image-2-6':'GPT Image 2.6','gpt-image-2-5':'GPT Image 2.5','gpt-image-2':'GPT Image 2'}[String(model)] || String(model || ''));
     }
@@ -3458,7 +3469,7 @@ async function saveKeyOnly(){
 }
 const FIXED_PROTOCOL_PROVIDER_IDS = new Set(['modelscope', 'volcengine', 'runninghub']);
 function providerSupportsModelProtocol(item){
-    return Boolean(item) && !FIXED_PROTOCOL_PROVIDER_IDS.has(item.id);
+    return Boolean(item) && item.protocol !== 'kie' && !FIXED_PROTOCOL_PROVIDER_IDS.has(item.id);
 }
 function modelProtocolSelectHtml(kind, index, model, item){
     if(kind === 'video' || !providerSupportsModelProtocol(item)) return '';

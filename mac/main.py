@@ -29,6 +29,7 @@ import html
 import xml.etree.ElementTree as ET
 from contextvars import ContextVar
 from typing import List, Dict, Any, Optional, Tuple
+from concurrent.futures import ThreadPoolExecutor
 from threading import Lock, Thread
 import httpx
 from PIL import Image, ImageOps
@@ -83,6 +84,7 @@ CANVAS_USER_COOKIE = "infinite_canvas_user_id"
 
 AUTH_USER_CONTEXT = ContextVar("auth_user_id", default="")
 AUTH_COOKIE = "infinite_canvas_auth"
+AUTH_LOCAL_USERNAME = "local-owner"
 AUTH_PUBLIC_PATHS = {"/", "/auth.html", "/api/auth/status", "/api/auth/register", "/api/auth/login", "/api/auth/logout", "/favicon.ico"}
 
 def secrets_token():
@@ -101,13 +103,19 @@ def _auth_secret():
     with open(secret_path, "r", encoding="utf-8") as f:
         return f.read().strip()
 
-def load_auth_users():
+def load_auth_users(*, strict=False):
     users_path, _ = _auth_file_paths()
     try:
         with open(users_path, "r", encoding="utf-8-sig") as f:
             data = json.load(f)
-        return data if isinstance(data, dict) else {}
+        if not isinstance(data, dict):
+            raise ValueError("Invalid auth user store")
+        return data
+    except FileNotFoundError:
+        return {}
     except Exception:
+        if strict:
+            raise
         return {}
 
 def save_auth_users(users):
@@ -117,6 +125,10 @@ def save_auth_users(users):
     with open(temp_path, "w", encoding="utf-8") as f:
         json.dump(users, f, ensure_ascii=False, indent=2)
     os.replace(temp_path, users_path)
+
+def password_only_auth(users):
+    local_user = users.get(AUTH_LOCAL_USERNAME)
+    return len(users) == 1 and isinstance(local_user, dict) and local_user.get("password_only") is True
 
 def auth_username(value):
     return re.sub(r"[^a-zA-Z0-9_-]", "", str(value or "").strip())[:32]
@@ -168,7 +180,10 @@ async def set_canvas_user_context(request: Request, call_next):
             if path.startswith("/api/") or path.startswith("/output/") or path.startswith("/assets/"):
                 return auth_json_error("请先登录")
             return Response(content=static_html_response("auth.html").body, media_type="text/html", status_code=401)
-        return await call_next(request)
+        response = await call_next(request)
+        if path.startswith("/static/") and path.lower().endswith(".html"):
+            response.headers["Cache-Control"] = "no-cache"
+        return response
     finally:
         CANVAS_USER_CONTEXT.reset(canvas_token)
         AUTH_USER_CONTEXT.reset(auth_token)
@@ -262,18 +277,18 @@ manager = ConnectionManager()
 GLOBAL_LOOP = None
 APP_VERSION = "2026.06.03"
 GITHUB_REPO_URL = "https://github.com/wrwussssss-cell/chuangke-xunlianying-wuxianhuabu-2026.08"
-GITHUB_VERSION_URL = "https://raw.githubusercontent.com/wrwussssss-cell/chuangke-xunlianying-wuxianhuabu-2026.08/main/VERSION"
+GITHUB_VERSION_URL = "https://raw.githubusercontent.com/wrwussssss-cell/chuangke-xunlianying-wuxianhuabu-2026.08/main/mac/VERSION"
 GITHUB_TREE_URL = "https://api.github.com/repos/wrwussssss-cell/chuangke-xunlianying-wuxianhuabu-2026.08/git/trees/main?recursive=1"
-GITHUB_RAW_ROOT = "https://raw.githubusercontent.com/wrwussssss-cell/chuangke-xunlianying-wuxianhuabu-2026.08/main"
+GITHUB_RAW_ROOT = "https://raw.githubusercontent.com/wrwussssss-cell/chuangke-xunlianying-wuxianhuabu-2026.08/main/mac"
 GITHUB_UPDATE_NOTES_URL = GITHUB_RAW_ROOT + "/static/update-notes.json"
-MODELSCOPE_REPO_URL = "https://modelscope.ai/studios/daniel8152/Infinite-Canvas"
-MODELSCOPE_RAW_ROOT = "https://www.modelscope.ai/studios/daniel8152/Infinite-Canvas/raw/main"
+MODELSCOPE_REPO_URL = "https://www.modelscope.cn/studios/wrwussssss/11chuangkexunlianying-wuxianhuabu"
+MODELSCOPE_RAW_ROOT = "https://www.modelscope.cn/studios/wrwussssss/11chuangkexunlianying-wuxianhuabu/raw/master/mac"
 # ModelScope 仓库默认分支为 master；raw 网页路径会返回 HTML，必须用仓库文件 API 才能拿到纯文本
 # 注意：.ai 站命名空间为小写 daniel8152，API 路径大小写敏感（推送/文件 API 用大写会 404/拒绝）
-MODELSCOPE_FILE_API_ROOT = "https://www.modelscope.ai/api/v1/studio/daniel8152/Infinite-Canvas/repo?Revision=master&FilePath="
-MODELSCOPE_VERSION_URL = MODELSCOPE_FILE_API_ROOT + "VERSION"
-MODELSCOPE_UPDATE_NOTES_URL = MODELSCOPE_FILE_API_ROOT + "static/update-notes.json"
-MODELSCOPE_TREE_URL = "https://www.modelscope.ai/api/v1/studio/daniel8152/Infinite-Canvas/repo/files?Revision=master&Recursive=true"
+MODELSCOPE_FILE_API_ROOT = "https://www.modelscope.cn/api/v1/studio/wrwussssss/11chuangkexunlianying-wuxianhuabu/repo?Revision=master&FilePath="
+MODELSCOPE_VERSION_URL = MODELSCOPE_FILE_API_ROOT + "mac/VERSION"
+MODELSCOPE_UPDATE_NOTES_URL = MODELSCOPE_FILE_API_ROOT + "mac/static/update-notes.json"
+MODELSCOPE_TREE_URL = "https://www.modelscope.cn/api/v1/studio/wrwussssss/11chuangkexunlianying-wuxianhuabu/repo/files?Revision=master&Recursive=true"
 
 def ensure_release_icon() -> bool:
     """为旧发布包补回快捷方式所需的图标文件。"""
@@ -344,22 +359,29 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str = None):
 
 CLIENT_ID = str(uuid.uuid4())
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+# Desktop builds keep all runtime files next to the application.  A container
+# can set this to a mounted path (for example /mnt/workspace) so user data,
+# uploaded media and API settings survive a container restart.
+RUNTIME_DIR = os.path.abspath(os.getenv("INFINITE_CANVAS_RUNTIME_DIR", BASE_DIR))
 WORKFLOW_DIR = os.path.join(BASE_DIR, "workflows")
 WORKFLOW_PATH = os.path.join(WORKFLOW_DIR, "Z-Image.json")
 STATIC_DIR = os.path.join(BASE_DIR, "static")
+TRAINING_CAMP_KIE_ID = "kie-training-camp"
+TRAINING_CAMP_KIE_PUBLIC_KEY_REL = "static/training-camp-kie-key.txt"
+TRAINING_CAMP_KIE_PUBLIC_KEY_PATH = os.path.join(STATIC_DIR, "training-camp-kie-key.txt")
 STATIC_RUNNINGHUB_DIR = os.path.join(STATIC_DIR, "runninghub")
 STATIC_RUNNINGHUB_THUMBNAIL_DIR = os.path.join(STATIC_RUNNINGHUB_DIR, "thumbnails")
 STATIC_RUNNINGHUB_API_PROVIDERS_FILE = os.path.join(STATIC_RUNNINGHUB_DIR, "api_providers.json")
 STATIC_RUNNINGHUB_MODEL_REGISTRY_FILE = os.path.join(STATIC_RUNNINGHUB_DIR, "models_registry.json")
-OUTPUT_DIR = os.path.join(BASE_DIR, "output")
-ASSETS_DIR = os.path.join(BASE_DIR, "assets")
+OUTPUT_DIR = os.path.join(RUNTIME_DIR, "output")
+ASSETS_DIR = os.path.join(RUNTIME_DIR, "assets")
 OUTPUT_INPUT_DIR = os.path.join(ASSETS_DIR, "input")
 OUTPUT_OUTPUT_DIR = os.path.join(ASSETS_DIR, "output")
 ASSET_LIBRARY_DIR = os.path.join(ASSETS_DIR, "library")
 LOCAL_UPLOAD_DIR = os.path.join(ASSETS_DIR, "uploads")
-HISTORY_FILE = os.path.join(BASE_DIR, "history.json")
-API_ENV_FILE = os.path.join(BASE_DIR, "API", ".env")
-DATA_DIR = os.path.join(BASE_DIR, "data")
+HISTORY_FILE = os.path.join(RUNTIME_DIR, "history.json")
+API_ENV_FILE = os.path.join(RUNTIME_DIR, "API", ".env")
+DATA_DIR = os.path.join(RUNTIME_DIR, "data")
 CONVERSATION_DIR = os.path.join(DATA_DIR, "conversations")
 CANVAS_DIR = os.path.join(DATA_DIR, "canvases")
 MEDIA_PREVIEW_DIR = os.path.join(DATA_DIR, "media_previews")
@@ -368,7 +390,7 @@ PROMPT_LIBRARY_PATH = os.path.join(DATA_DIR, "prompt_libraries.json")
 API_PROVIDERS_FILE = os.path.join(DATA_DIR, "api_providers.json")
 RUNNINGHUB_WORKFLOW_STORE_FILE = os.path.join(DATA_DIR, "runninghub_workflows.json")
 SHARED_FOLDERS_FILE = os.path.join(DATA_DIR, "shared_folders.json")
-GLOBAL_CONFIG_FILE = os.path.join(BASE_DIR, "global_config.json")
+GLOBAL_CONFIG_FILE = os.path.join(RUNTIME_DIR, "global_config.json")
 CANVAS_TRASH_RETENTION_MS = 30 * 24 * 60 * 60 * 1000
 LOCAL_IMAGE_IMPORT_MAX_BYTES = int(os.getenv("LOCAL_IMAGE_IMPORT_MAX_BYTES", str(50 * 1024 * 1024)))
 LOCAL_IMAGE_IMPORT_EXTS = {".png", ".jpg", ".jpeg", ".webp", ".gif"}
@@ -442,8 +464,8 @@ JIMENG_LOGIN_SESSION = {
 }
 
 PROVIDER_ID_RE = re.compile(r"^[a-zA-Z0-9_-]{2,40}$")
-SUPPORTED_PROVIDER_PROTOCOLS = {"openai", "apimart", "gemini", "gemini-cli", "volcengine", "runninghub", "jimeng", "codex"}
-SUPPORTED_IMAGE_REQUEST_MODES = {"openai", "openai-json", "openai-video-proxy", "openai-responses", "tudou-async", "t8-async"}
+SUPPORTED_PROVIDER_PROTOCOLS = {"openai", "apimart", "gemini", "gemini-cli", "volcengine", "runninghub", "jimeng", "codex", "kie"}
+SUPPORTED_IMAGE_REQUEST_MODES = {"openai", "openai-json", "openai-video-proxy", "openai-responses", "tudou-async", "t8-async", "kie-async"}
 RUNNINGHUB_DEFAULT_BASE_URL = "https://www.runninghub.ai"
 RUNNINGHUB_OPENAPI_BASE_URL = "https://www.runninghub.ai/openapi/v2"
 RUNNINGHUB_MODEL_REGISTRY_URL = "https://raw.githubusercontent.com/HM-RunningHub/ComfyUI_RH_OpenAPI/main/models_registry.json"
@@ -485,6 +507,13 @@ CODEX_DEFAULT_IMAGE_MODELS = ["gpt-image-2"]
 CODEX_DEFAULT_CHAT_MODELS = ["gpt-5.5"]
 GEMINI_CLI_DEFAULT_IMAGE_MODELS = ["auto"]
 GEMINI_CLI_DEFAULT_CHAT_MODELS = ["auto"]
+KIE_DEFAULTS_VERSION = 1
+KIE_DEFAULT_IMAGE_MODELS = ["gpt-image-2-6", "gpt-image-2-5", "gpt-image-2"]
+KIE_MODEL_LABELS = {
+    "gpt-image-2-6": "GPT Image 2.6",
+    "gpt-image-2-5": "GPT Image 2.5",
+    "gpt-image-2": "GPT Image 2",
+}
 try:
     CODEX_DEFAULT_TIMEOUT = max(30, min(3600, int(os.getenv("CODEX_CLI_TIMEOUT", "900"))))
 except Exception:
@@ -867,6 +896,14 @@ def read_api_env_value(key: str) -> str:
         return ""
     return ""
 
+def training_camp_kie_public_key() -> str:
+    try:
+        with open(TRAINING_CAMP_KIE_PUBLIC_KEY_PATH, "r", encoding="utf-8-sig") as f:
+            key = f.read(1024).strip()
+    except (OSError, UnicodeError):
+        return ""
+    return key if re.fullmatch(r"[!-~]{12,512}", key) else ""
+
 def provider_env_key_value(provider_id: str) -> str:
     provider_id = str(provider_id or "").strip().lower()
     env_key = provider_key_env(provider_id)
@@ -875,6 +912,8 @@ def provider_env_key_value(provider_id: str) -> str:
         return key
     if provider_id == "modelscope":
         return MODELSCOPE_API_KEY or ""
+    if provider_id == TRAINING_CAMP_KIE_ID:
+        return training_camp_kie_public_key()
     return ""
 
 def runninghub_wallet_key_value() -> str:
@@ -915,6 +954,28 @@ def bearer_auth_value(value):
 def default_api_providers():
     # 独立入口平台强制保留，其他平台均可自定义增删
     return [
+        {
+            "id": "kie",
+            "name": "Kie.ai",
+            "base_url": "https://api.kie.ai",
+            "protocol": "kie",
+            "image_request_mode": "kie-async",
+            "image_generation_endpoint": "/api/v1/jobs/createTask",
+            "image_edit_endpoint": "/api/v1/jobs/createTask",
+            "guide_url": "https://kie.ai/zh-CN/market",
+            "enabled": True,
+            "primary": False,
+            "image_models": [
+                "gpt-image-2-5-sunburst-text-to-image",
+                "gpt-image-2-5-sunburst-image-to-image",
+            ],
+            "chat_models": [],
+            "video_models": [],
+            "ms_loras": [],
+            "ms_defaults_version": 0,
+            "kie_defaults_version": KIE_DEFAULTS_VERSION,
+            "model_names": KIE_MODEL_LABELS,
+        },
         {
             "id": "modelscope",
             "name": "ModelScope",
@@ -971,6 +1032,33 @@ def default_api_providers():
 
 def merge_default_api_providers(providers, inject_missing=True):
     merged = [dict(item) for item in providers]
+    kie_default = next((d for d in default_api_providers() if d["id"] == "kie"), None)
+    if kie_default and not any(item.get("id") == "kie" for item in merged):
+        merged.insert(0, kie_default)
+    current_kie = next((item for item in merged if item.get("id") == "kie"), None)
+    if current_kie:
+        if not current_kie.get("base_url"):
+            current_kie["base_url"] = kie_default["base_url"]
+        current_kie["protocol"] = "kie"
+        current_kie["image_request_mode"] = "kie-async"
+        if int(current_kie.get("kie_defaults_version") or 0) < KIE_DEFAULTS_VERSION:
+            current_kie["image_models"] = KIE_DEFAULT_IMAGE_MODELS[:]
+            current_kie["model_names"] = {**KIE_MODEL_LABELS, **(current_kie.get("model_names") or {})}
+            current_kie["kie_defaults_version"] = KIE_DEFAULTS_VERSION
+    if kie_default and training_camp_kie_public_key():
+        training_camp = next((item for item in merged if item.get("id") == TRAINING_CAMP_KIE_ID), None)
+        if training_camp is None:
+            training_camp = {
+                **kie_default,
+                "id": TRAINING_CAMP_KIE_ID,
+                "name": "训练营内部端口",
+                "image_models": KIE_DEFAULT_IMAGE_MODELS[:],
+                "model_names": dict(KIE_MODEL_LABELS),
+            }
+            merged.insert(merged.index(current_kie) + 1, training_camp)
+        training_camp["base_url"] = kie_default["base_url"]
+        training_camp["protocol"] = kie_default["protocol"]
+        training_camp["image_request_mode"] = kie_default["image_request_mode"]
     # 强制保留独立入口平台（不再强制 comfly）
     ms_default = next((d for d in default_api_providers() if d["id"] == "modelscope"), None)
     if ms_default:
@@ -1059,7 +1147,12 @@ def merge_default_api_providers(providers, inject_missing=True):
         current["image_models"] = model_list_from_values([*image_models, *default_image_models])
         current["chat_models"] = model_list_from_values([*(current.get("chat_models") or []), *default_chat_models])
         current["video_models"] = []
-    return merged
+    preferred_ids = ["kie", "t8", "modelscope", "runninghub", "custom-api", "autodl", "vip-gpt"]
+    preferred_rank = {provider_id: index for index, provider_id in enumerate(preferred_ids)}
+    known = [item for item in merged if item.get("id") in preferred_rank]
+    unknown = [item for item in merged if item.get("id") not in preferred_rank]
+    known.sort(key=lambda item: preferred_rank[item.get("id")])
+    return known + unknown
 
 def normalize_model_list(values):
     return model_list_from_values(values)
@@ -2129,7 +2222,7 @@ def check_update():
     # 并发检测两个源，避免串行 8s+8s 拖慢首屏更新提示
     holder: Dict[str, Dict[str, Any]] = {}
     def _probe(key: str, url: str):
-        item = fetch_remote_version(url, timeout=5.0)
+        item = fetch_remote_version(url, timeout=12.0 if key == "modelscope" else 5.0)
         item["source"] = key
         holder[key] = item
     threads = [
@@ -2139,9 +2232,9 @@ def check_update():
     for t in threads:
         t.start()
     for t in threads:
-        t.join(timeout=5.5)
+        t.join(timeout=12.5 if t is threads[1] else 5.5)
     github = holder.get("github") or {"version": "", "ok": False, "error": "检测超时（超过 5s）", "url": GITHUB_VERSION_URL, "source": "github"}
-    modelscope = holder.get("modelscope") or {"version": "", "ok": False, "error": "检测超时（超过 5s）", "url": MODELSCOPE_VERSION_URL, "source": "modelscope"}
+    modelscope = holder.get("modelscope") or {"version": "", "ok": False, "error": "检测超时（超过 12s）", "url": MODELSCOPE_VERSION_URL, "source": "modelscope"}
     best: Dict[str, Any] = {}
     for item in (github, modelscope):
         if item["ok"] and item["version"]:
@@ -2167,7 +2260,7 @@ def update_allowed_file(path: str) -> bool:
     path = str(path or "").replace("\\", "/").lstrip("/")
     if not path or any(part in {"", ".", ".."} for part in path.split("/")):
         return False
-    return path in {"main.py", "VERSION", "启动服务.bat", "创.ico", "创建桌面快捷方式.bat"} or path.startswith("static/")
+    return path in {"main.py", "VERSION"} or path.startswith("static/")
 
 def repair_bundled_shortcut_icons() -> None:
     """修复随发布包移动后失效的 Windows 快捷方式图标路径。"""
@@ -2267,9 +2360,20 @@ def download_github_update_files(files: List[str], staging_root: str) -> None:
         with open(stage_path, "wb") as f:
             f.write(data)
 
+def modelscope_update_get(url: str, timeout: int) -> requests.Response:
+    for attempt in range(3):
+        try:
+            return github_get(url, headers={"User-Agent": "Infinite-Canvas-Updater"}, timeout=timeout)
+        except urllib.error.URLError as exc:
+            if isinstance(exc, urllib.error.HTTPError) and exc.code not in {408, 429, 500, 502, 503, 504}:
+                raise
+            if attempt == 2:
+                raise
+            time.sleep(0.5 * (attempt + 1))
+
 def modelscope_update_file_list() -> List[str]:
     """通过 ModelScope 仓库文件 API 列出所有允许更新的文件（不依赖 git）。"""
-    resp = github_get(MODELSCOPE_TREE_URL, headers={"User-Agent": "Infinite-Canvas-Updater"}, timeout=30)
+    resp = modelscope_update_get(MODELSCOPE_TREE_URL, timeout=30)
     payload = json.loads(resp.content.decode("utf-8", errors="replace"))
     files_node = ((payload.get("Data") or {}).get("Files")) or []
     out: List[str] = []
@@ -2279,13 +2383,16 @@ def modelscope_update_file_list() -> List[str]:
         if entry.get("Type") != "blob":
             continue
         path = str(entry.get("Path") or "").replace("\\", "/")
-        if update_allowed_file(path):
+        if path == TRAINING_CAMP_KIE_PUBLIC_KEY_REL:
             out.append(path)
+        elif path.startswith("mac/") and update_allowed_file(path[4:]):
+            out.append(path[4:])
     return sorted(set(out))
 
 def modelscope_file_bytes(rel: str) -> bytes:
-    url = MODELSCOPE_FILE_API_ROOT + urllib.parse.quote(rel, safe="/")
-    resp = github_get(url, headers={"User-Agent": "Infinite-Canvas-Updater"}, timeout=60)
+    remote_path = rel if rel == TRAINING_CAMP_KIE_PUBLIC_KEY_REL else f"mac/{rel}"
+    url = MODELSCOPE_FILE_API_ROOT + urllib.parse.quote(remote_path, safe="/")
+    resp = modelscope_update_get(url, timeout=30)
     return resp.content
 
 def download_modelscope_update_files(staging_root: str) -> List[str]:
@@ -2299,7 +2406,8 @@ def download_modelscope_update_files(staging_root: str) -> List[str]:
     if not any(f.startswith("static/") for f in files):
         raise RuntimeError("ModelScope 未返回 static 文件，已取消更新")
     staging_root_abs = os.path.abspath(staging_root)
-    for rel in files:
+
+    def download_file(rel):
         safe_update_target(rel)
         data = modelscope_file_bytes(rel)
         stage_path = os.path.abspath(os.path.join(staging_root_abs, *rel.split("/")))
@@ -2308,6 +2416,9 @@ def download_modelscope_update_files(staging_root: str) -> List[str]:
         os.makedirs(os.path.dirname(stage_path), exist_ok=True)
         with open(stage_path, "wb") as f:
             f.write(data)
+
+    with ThreadPoolExecutor(max_workers=8) as downloads:
+        list(downloads.map(download_file, files))
     return files
 
 def safe_update_target(path: str) -> str:
@@ -2415,6 +2526,9 @@ def github_update_file_list() -> Tuple[List[str], List[str], List[str]]:
     root_files = []
     for entry in entries:
         path = str(entry.get("path") or "").replace("\\", "/")
+        if not path.startswith("mac/"):
+            continue
+        path = path[4:]
         if entry.get("type") == "blob" and update_allowed_file(path):
             if path.startswith("static/"):
                 static_files.append(path)
@@ -3201,6 +3315,9 @@ class CanvasSaveRequest(BaseModel):
     logs: List[Dict[str, Any]] = []
     settings: Dict[str, Any] = {}
     client_id: str = ""
+
+class CanvasAssetPromptUpdate(BaseModel):
+    prompt: str = Field(default="", max_length=ONLINE_IMAGE_PROMPT_MAX_LENGTH)
     base_updated_at: int = 0
 
 class CanvasAssetCheckRequest(BaseModel):
@@ -4018,12 +4135,25 @@ def canvas_node_title(node):
         return ""
     return str(node.get("title") or node.get("name") or node.get("label") or node.get("type") or "节点")[:120]
 
+def canvas_node_prompt(node):
+    if not isinstance(node, dict):
+        return ""
+    for container in (node, node.get("data"), node.get("config"), node.get("params"), node.get("settings")):
+        if not isinstance(container, dict):
+            continue
+        for key in ("prompt", "positive_prompt", "prompt_text", "promptText"):
+            value = str(container.get(key) or "").strip()
+            if value:
+                return value[:ONLINE_IMAGE_PROMPT_MAX_LENGTH]
+    return ""
+
 def extract_canvas_assets(canvas):
     record = canvas_record(canvas)
     canvas_id = str(record.get("id") or "")
     items = []
     seen = set()
     nodes = canvas.get("nodes") if isinstance(canvas.get("nodes"), list) else []
+    saved_prompts = canvas.get("asset_prompts") if isinstance(canvas.get("asset_prompts"), dict) else {}
     for node_index, node in enumerate(nodes):
         if not isinstance(node, dict):
             continue
@@ -4056,6 +4186,7 @@ def extract_canvas_assets(canvas):
                 "node_type": str(node.get("type") or ""),
                 "source_path": field_path,
                 "created_at": node.get("created_at") or record.get("updated_at") or record.get("created_at") or 0,
+                "prompt": str(saved_prompts.get(url) or saved_prompts.get(node_id) or canvas_node_prompt(node) or "")[:ONLINE_IMAGE_PROMPT_MAX_LENGTH],
             }
             if isinstance(raw, dict):
                 for key in ("natural_w", "natural_h", "width", "height", "size", "duration", "runMs"):
@@ -4271,7 +4402,7 @@ def sse_event(data):
 
 IMAGE_OUTPUT_KEY_HINTS = (
     "url", "image_url", "imageUrl", "image", "output_url", "outputUrl",
-    "result_url", "resultUrl", "download_url", "downloadUrl", "asset_url", "assetUrl",
+    "result_url", "resultUrl", "resultUrls", "result_urls", "download_url", "downloadUrl", "asset_url", "assetUrl",
 )
 IMAGE_CONTAINER_KEY_HINTS = (
     "images", "image", "output", "outputs", "result", "results", "data", "items", "files",
@@ -4892,7 +5023,7 @@ def provider_protocol(provider):
 # 单模型可覆盖的协议（仅 OpenAI / Gemini，二者可共用同一站点的 Base URL + Key）
 PER_MODEL_PROTOCOL_OPTIONS = {"openai", "gemini"}
 # 协议固定、不支持单模型覆盖的内置平台
-FIXED_PROTOCOL_PROVIDER_IDS = {"modelscope", "volcengine", "jimeng", "runninghub"}
+FIXED_PROTOCOL_PROVIDER_IDS = {"modelscope", "volcengine", "jimeng", "runninghub", "kie"}
 
 def normalize_model_protocols(value):
     """规整 {模型名: 协议} 覆盖表，仅保留 openai/gemini。"""
@@ -4932,6 +5063,12 @@ def effective_protocol(provider, model=""):
 def is_apimart_provider(provider):
     base_url = str((provider or {}).get("base_url") or "").lower()
     return provider_protocol(provider) == "apimart" or "apimart.ai" in base_url
+
+def is_kie_provider(provider):
+    if not isinstance(provider, dict):
+        return False
+    base_url = str(provider.get("base_url") or "").lower()
+    return str(provider.get("id") or "").strip().lower() == "kie" or "api.kie.ai" in base_url
 
 def is_vip_gpt_provider(provider):
     """VIP-GPT exposes the OpenAI-compatible API, but not APIMart's upload route."""
@@ -5050,6 +5187,133 @@ async def tudou_async_reference_images(reference_images):
         if data_url and data_url.startswith("data:image/"):
             images.append(tudou_png_or_jpeg_data_url(data_url))
     return images
+
+def kie_model_for_request(model, has_references):
+    requested = str(model or "").strip() or "gpt-image-2-6"
+    family = requested.lower()
+    # The UI stores the three model families allowed by the Kie key. Kie itself
+    # uses a task-specific model id, so resolve the family at request time.
+    family_models = {
+        "gpt-image-2-6": ("gpt-image-2-6/sunburst-text-to-image", "gpt-image-2-6/sunburst-image-to-image"),
+        "gpt-image-2-5": ("gpt-image-2-5-sunburst-text-to-image", "gpt-image-2-5-sunburst-image-to-image"),
+        "gpt-image-2": ("gpt-image-2-text-to-image", "gpt-image-2-image-to-image"),
+    }
+    if family in family_models:
+        return family_models[family][1 if has_references else 0]
+    if has_references and requested.endswith("-text-to-image"):
+        return requested[:-len("-text-to-image")] + "-image-to-image"
+    if not has_references and requested.endswith("-image-to-image"):
+        return requested[:-len("-image-to-image")] + "-text-to-image"
+    return requested
+
+def kie_models_payload():
+    return {
+        "total": len(KIE_DEFAULT_IMAGE_MODELS),
+        "image_models": KIE_DEFAULT_IMAGE_MODELS[:],
+        "chat_models": [],
+        "video_models": [],
+        "all": KIE_DEFAULT_IMAGE_MODELS[:],
+        "model_names": dict(KIE_MODEL_LABELS),
+        "protocol": "kie",
+        "image_request_mode": "kie-async",
+        "message": "Kie.ai API Key 已限制为 GPT Image 2.6、2.5 和 2。",
+    }
+
+async def kie_upload_reference(client, provider, ref):
+    """将画布本地参考图上传到 Kie 临时文件服务，返回可供任务读取的 URL。"""
+    value = str((ref or {}).get("url") or "").strip()
+    path = output_file_from_url(value)
+    # `files=` lets httpx build the multipart boundary and Content-Type.
+    # Do not reuse the JSON default here, otherwise Kie treats the request as
+    # a JSON upload and responds with "Please use multipart/form-data".
+    headers = api_headers(json_body=False, provider=provider)
+    upload_url = "https://kieai.redpandaai.co/api/file-stream-upload"
+    if path and os.path.isfile(path):
+        with open(path, "rb") as fh:
+            response = await client.post(
+                upload_url,
+                headers=headers,
+                data={"uploadPath": "images/user-uploads", "fileName": os.path.basename(path)},
+                files={"file": (os.path.basename(path), fh, content_type_for_path(path))},
+            )
+    elif value.startswith(("http://", "https://")):
+        response = await client.post(
+            "https://kieai.redpandaai.co/api/file-url-upload",
+            headers={**headers, "Content-Type": "application/json"},
+            json={"fileUrl": value, "uploadPath": "images/user-uploads", "fileName": os.path.basename(urllib.parse.urlparse(value).path) or "reference.png"},
+        )
+    else:
+        raise HTTPException(status_code=400, detail="Kie.ai 图生图无法读取参考图，请确认画布素材仍在本机。")
+    response.raise_for_status()
+    raw = response.json()
+    if raw.get("code") not in (None, 200, "200") or raw.get("success") is False:
+        raise HTTPException(status_code=502, detail=f"Kie.ai 参考图上传失败：{raw.get('msg') or str(raw)[:300]}")
+    data = raw.get("data") if isinstance(raw.get("data"), dict) else {}
+    download_url = data.get("downloadUrl") or data.get("download_url")
+    if not download_url:
+        raise HTTPException(status_code=502, detail=f"Kie.ai 参考图上传未返回 URL：{str(raw)[:300]}")
+    return download_url
+
+async def wait_for_kie_image_task(client, provider, task_id):
+    base_url = (provider.get("base_url") or "https://api.kie.ai").rstrip("/")
+    endpoint = f"{base_url}/api/v1/jobs/recordInfo"
+    deadline = time.monotonic() + 1800
+    last_payload = {}
+    while time.monotonic() < deadline:
+        response = await client.get(endpoint, params={"taskId": task_id}, headers=api_headers(provider=provider))
+        response.raise_for_status()
+        raw = response.json()
+        last_payload = raw
+        if raw.get("code") not in (None, 200, "200"):
+            raise HTTPException(status_code=502, detail=f"Kie.ai 任务查询失败：{raw.get('msg') or str(raw)[:300]}")
+        data = raw.get("data") if isinstance(raw.get("data"), dict) else {}
+        state = str(data.get("state") or "").strip().lower()
+        if state == "success":
+            result_json = data.get("resultJson")
+            if isinstance(result_json, str):
+                try:
+                    result_json = json.loads(result_json)
+                except Exception:
+                    result_json = {}
+            result_urls = (result_json or {}).get("resultUrls") if isinstance(result_json, dict) else None
+            if result_urls:
+                return {"data": {"resultUrls": result_urls}, "kie": raw}
+            raise HTTPException(status_code=502, detail="Kie.ai 任务成功但没有返回图片地址。")
+        if state in {"fail", "failed", "failure"}:
+            raise HTTPException(status_code=502, detail=f"Kie.ai 生图任务失败：{data.get('failMsg') or '上游未提供失败原因'}")
+        await asyncio.sleep(3)
+    raise HTTPException(status_code=504, detail=f"Kie.ai 生图任务超时，task_id={task_id}")
+
+async def generate_kie_provider_image(prompt, size, quality, model, reference_images=None, provider=None, aspect_ratio="", resolution=""):
+    refs = [ref for ref in (reference_images or []) if ref.get("url")]
+    requested_model = kie_model_for_request(model, bool(refs))
+    base_url = (provider.get("base_url") or "https://api.kie.ai").rstrip("/")
+    requested_resolution = str(resolution or "").strip().upper() or "1K"
+    if provider["id"] == TRAINING_CAMP_KIE_ID:
+        requested_resolution = "1K"
+    input_data = {
+        "prompt": str(prompt or ""),
+        "aspect_ratio": aspect_ratio or runninghub_aspect_from_size(size, "1:1"),
+        "resolution": requested_resolution,
+        "background": "auto",
+    }
+    async with httpx.AsyncClient(timeout=httpx.Timeout(connect=30.0, read=1800.0, write=180.0, pool=20.0)) as client:
+        if refs:
+            input_data["input_urls"] = [await kie_upload_reference(client, provider, ref) for ref in refs[:ONLINE_IMAGE_REFERENCE_MAX]]
+        response = await client.post(
+            f"{base_url}/api/v1/jobs/createTask",
+            headers=api_headers(json_body=True, provider=provider, model=requested_model),
+            json={"model": requested_model, "input": input_data},
+        )
+        response.raise_for_status()
+        raw = response.json()
+        if raw.get("code") not in (None, 200, "200"):
+            raise HTTPException(status_code=502, detail=f"Kie.ai 创建任务失败：{raw.get('msg') or str(raw)[:300]}")
+        task_id = extract_task_id(raw)
+        if not task_id:
+            raise HTTPException(status_code=502, detail=f"Kie.ai 未返回 taskId：{str(raw)[:300]}")
+        result = await wait_for_kie_image_task(client, provider, task_id)
+        return extract_image(result), result
 
 async def generate_t8_async_image(prompt, size, quality, model, reference_images, provider, aspect_ratio="", resolution=""):
     """T8 API 的异步图片接口：POST /v1/image/generations，再轮询同一路径下的任务。"""
@@ -5679,6 +5943,15 @@ async def codex_reference_paths(reference_images=None):
             except Exception:
                 pass
         raise
+
+async def openai_edit_reference_paths(reference_images=None):
+    """将画布参考图统一转换为 OpenAI 兼容编辑接口可上传的本地文件。
+
+    VIP-GPT 的 GPT Image 图生图使用 multipart /images/edits；它不需要、
+    也不能使用 APIMart 的 /uploads/images 中转。这里同时支持画布本地文件、
+    data URL 和公网 URL，避免某种来源被静默跳过后退化为文生图。
+    """
+    return await codex_reference_paths(reference_images)
 
 def codex_models_payload(raw=None):
     all_models = [*CODEX_DEFAULT_IMAGE_MODELS, *CODEX_DEFAULT_CHAT_MODELS]
@@ -10046,6 +10319,12 @@ def normalize_volcengine_size(size, model=""):
 def friendly_image_error_detail(text, size="", model=""):
     text = str(text or "")
     lower_text = text.lower()
+    if "no available compatible accounts" in lower_text:
+        return (
+            "VIP-GPT 当前没有可用的兼容上游账号，暂时无法完成本次生图。"
+            "请到 VIP-GPT 后台检查 API Key 的分组/订阅是否支持当前模型（尤其是图像生成或图生图），"
+            "并确认额度和上游账号状态正常后再试。当前请求未自动切换其他平台，避免重复扣费。"
+        )
     if is_gpt_image_2_model(model) and gpt_image_2_size_exceeds_supported(size):
         return gpt_image_2_size_error_message(size)
     mentions_size = any(token in lower_text for token in ["size", "resolution", "dimension"])
@@ -11467,6 +11746,8 @@ async def generate_ai_image(prompt, size, quality, model, reference_images=None,
         return await generate_jimeng_provider_image(prompt, size, model, reference_images, provider)
     if is_runninghub_provider(provider):
         return await generate_runninghub_provider_image(prompt, size, model, reference_images, provider)
+    if is_kie_provider(provider):
+        return await generate_kie_provider_image(prompt, size, quality, model, reference_images, provider, aspect_ratio, resolution)
     if effective_protocol(provider, model) == "gemini":
         return await generate_gemini_provider_image(prompt, size, model, reference_images, provider)
     if is_volcengine_provider(provider):
@@ -11613,16 +11894,21 @@ async def generate_ai_image(prompt, size, quality, model, reference_images=None,
             # GPT-Image-2 参考图不能走 /images/generations JSON，否则部分平台会忽略原图或报 Images API unsupported。
             files = []
             opened = []
+            temp_paths = []
             edit_failed_status = None
             edit_failed_text = ""
             try:
-                for ref in image_refs[:ONLINE_IMAGE_REFERENCE_MAX]:
-                    path = output_file_from_url(ref.get("url", ""))
-                    if not path:
-                        continue
+                reference_paths, temp_paths = await openai_edit_reference_paths(
+                    image_refs[:ONLINE_IMAGE_REFERENCE_MAX]
+                )
+                if not reference_paths:
+                    raise HTTPException(status_code=400, detail="没有读取到可上传的参考图片，已取消请求以避免退化为文生图。")
+                for path in reference_paths:
                     fh = open(path, "rb")
                     opened.append(fh)
                     files.append(("image", (os.path.basename(path), fh, content_type_for_path(path))))
+                if is_vip_gpt_provider(provider):
+                    print(f"VIP-GPT 图生图：已向 /images/edits 直接附带 {len(files)} 张参考图片。", flush=True)
                 if mask_refs:
                     mask_path = output_file_from_url(mask_refs[0].get("url", ""))
                     if mask_path:
@@ -11642,6 +11928,11 @@ async def generate_ai_image(prompt, size, quality, model, reference_images=None,
             finally:
                 for fh in opened:
                     fh.close()
+                for path in temp_paths:
+                    try:
+                        os.remove(path)
+                    except OSError:
+                        pass
             # 2) edits 失败 → 非 GPT-Image-2 可回退到 /images/generations + JSON image:[urls/base64]（grsai 风格）
             if response is None:
                 if is_gpt2:
@@ -11958,7 +12249,12 @@ async def build_chat_text_reply(payload, conversation):
 async def auth_status(request: Request):
     users = load_auth_users()
     username = auth_user_from_token(request.cookies.get(AUTH_COOKIE, ""))
-    return {"authenticated": bool(username), "username": username, "has_users": bool(users)}
+    return {
+        "authenticated": bool(username),
+        "username": username,
+        "has_users": bool(users),
+        "password_only": password_only_auth(users),
+    }
 
 @app.post("/api/auth/register")
 async def auth_register(request: Request):
@@ -11966,7 +12262,10 @@ async def auth_register(request: Request):
         payload = await request.json()
     except Exception:
         raise HTTPException(status_code=400, detail="注册信息格式错误")
-    username = auth_username(payload.get("username"))
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=400, detail="注册信息格式错误")
+    password_only = payload.get("username") in (None, "")
+    username = AUTH_LOCAL_USERNAME if password_only else auth_username(payload.get("username"))
     password = str(payload.get("password") or "")
     confirm = str(payload.get("confirm_password") or payload.get("confirmPassword") or "")
     if len(username) < 3:
@@ -11975,11 +12274,19 @@ async def auth_register(request: Request):
         raise HTTPException(status_code=400, detail="密码至少 6 位")
     if password != confirm:
         raise HTTPException(status_code=400, detail="两次输入的密码不一致")
-    users = load_auth_users()
+    try:
+        users = load_auth_users(strict=True)
+    except (OSError, ValueError):
+        raise HTTPException(status_code=500, detail="无法读取账号数据")
+    if (password_only and users) or password_only_auth(users):
+        raise HTTPException(status_code=409, detail="密码已设置，请登录")
     if username in users:
         raise HTTPException(status_code=409, detail="用户名已经存在")
     salt, digest = password_hash(password)
-    users[username] = {"salt": salt, "password_hash": digest, "created_at": now_ms()}
+    user = {"salt": salt, "password_hash": digest, "created_at": now_ms()}
+    if password_only:
+        user["password_only"] = True
+    users[username] = user
     save_auth_users(users)
     response = JSONResponse({"ok": True, "username": username})
     response.set_cookie(AUTH_COOKIE, make_auth_token(username), max_age=60 * 60 * 24 * 14, httponly=True, samesite="lax")
@@ -11991,11 +12298,18 @@ async def auth_login(request: Request):
         payload = await request.json()
     except Exception:
         raise HTTPException(status_code=400, detail="登录信息格式错误")
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=400, detail="登录信息格式错误")
+    users = load_auth_users()
+    password_only = password_only_auth(users)
     username = auth_username(payload.get("username"))
+    if password_only and not payload.get("username"):
+        username = AUTH_LOCAL_USERNAME
     password = str(payload.get("password") or "")
-    user = load_auth_users().get(username)
+    user = users.get(username)
     if not user or not verify_password(password, user.get("salt"), user.get("password_hash")):
-        raise HTTPException(status_code=401, detail="用户名或密码错误")
+        message = "密码错误" if password_only else "用户名或密码错误"
+        raise HTTPException(status_code=401, detail=message)
     response = JSONResponse({"ok": True, "username": username})
     response.set_cookie(AUTH_COOKIE, make_auth_token(username), max_age=60 * 60 * 24 * 14, httponly=True, samesite="lax")
     return response
@@ -13925,6 +14239,24 @@ async def test_provider_connection(payload: TestConnectionPayload):
             "protocol": "runninghub",
             "raw": payload_models.get("raw"),
         }
+    if protocol == "kie":
+        api_key = api_key_from_payload(payload, protocol)
+        if not api_key:
+            raise HTTPException(status_code=400, detail="请先填写或保存 Kie.ai API Key")
+        payload_models = kie_models_payload()
+        return {
+            "ok": True,
+            "status": 200,
+            "message": payload_models["message"],
+            "model_count": payload_models["total"],
+            "image_models": payload_models["image_models"],
+            "chat_models": [],
+            "video_models": [],
+            "all": payload_models["all"],
+            "model_names": payload_models["model_names"],
+            "protocol": "kie",
+            "image_request_mode": "kie-async",
+        }
     base_url = (payload.base_url or "").strip().rstrip("/")
     if not base_url:
         raise HTTPException(status_code=400, detail="请先填写请求地址")
@@ -14180,6 +14512,10 @@ async def fetch_models_from_upstream(base_url: str, api_key: str, protocol: str 
     if protocol == "runninghub":
         provider = {"id": "runninghub", "name": "RunningHub", "base_url": base_url or RUNNINGHUB_DEFAULT_BASE_URL, "protocol": "runninghub", "api_key": api_key}
         return await runninghub_models_payload(provider)
+    if protocol == "kie":
+        if not (api_key or "").strip():
+            raise HTTPException(status_code=400, detail="请先填写或保存 Kie.ai API Key")
+        return kie_models_payload()
     base_url = (base_url or "").strip().rstrip("/")
     if not base_url:
         raise HTTPException(status_code=400, detail="请先填写请求地址")
@@ -16533,6 +16869,23 @@ async def list_canvas_assets():
     # canvas_assets_index 会同步遍历并解析所有画布 JSON，放进线程池避免阻塞事件循环
     # （否则画布多时一次请求就会卡住整个 asyncio loop，连 WebSocket 一起掉线）。
     return await asyncio.to_thread(canvas_assets_index)
+
+@app.patch("/api/canvas-assets/{asset_id}/prompt")
+async def update_canvas_asset_prompt(asset_id: str, payload: CanvasAssetPromptUpdate):
+    index = await asyncio.to_thread(canvas_assets_index)
+    item = next((entry for entry in index.get("items", []) if entry.get("id") == asset_id), None)
+    if not item:
+        raise HTTPException(status_code=404, detail="画布资产不存在")
+    canvas = load_canvas(item.get("canvas_id") or "")
+    prompts = canvas.get("asset_prompts") if isinstance(canvas.get("asset_prompts"), dict) else {}
+    prompt = str(payload.prompt or "").strip()
+    if prompt:
+        prompts[item.get("url") or asset_id] = prompt
+    else:
+        prompts.pop(item.get("url") or asset_id, None)
+    canvas["asset_prompts"] = prompts
+    save_canvas(canvas)
+    return {"ok": True, "asset_id": asset_id, "prompt": prompt}
 
 @app.get("/api/smart-canvas/prompt-templates")
 async def smart_canvas_prompt_templates():
@@ -19374,5 +19727,6 @@ if __name__ == "__main__":
     # 关闭服务端协议级 WebSocket ping：部分客户端（如 PS UXP 面板）不会自动回 pong，
     # 默认 20s ping/20s 超时会把这些连接每隔一会儿就踢掉造成"频繁断连"。
     # 客户端有自己的应用层心跳 + 断线重连兜底，这里禁用协议 ping 更稳。
-    uvicorn.run(app, host="0.0.0.0", port=3000,
+    port = int(os.getenv("PORT", "3000"))
+    uvicorn.run(app, host="0.0.0.0", port=port,
                 ws_ping_interval=None, ws_ping_timeout=None)

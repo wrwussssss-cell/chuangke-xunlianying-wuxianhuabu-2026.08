@@ -1,4 +1,5 @@
 @echo off
+chcp 65001 >nul
 cd /d "%~dp0"
 
 set "APP_DIR=%~dp0"
@@ -9,15 +10,17 @@ if not exist "%PYEXE%" set "PYEXE=python"
 
 set "LAN_IP=127.0.0.1"
 for /f "usebackq delims=" %%I in (`powershell -NoProfile -ExecutionPolicy Bypass -Command "$ip=(Get-NetIPConfiguration | Where-Object { $_.IPv4DefaultGateway -and $_.IPv4Address } | Select-Object -First 1 -ExpandProperty IPv4Address).IPAddress; if(-not $ip){$ip=(Get-NetIPAddress -AddressFamily IPv4 | Where-Object { $_.IPAddress -notlike '127.*' -and $_.IPAddress -notlike '169.254.*' } | Sort-Object InterfaceMetric | Select-Object -First 1 -ExpandProperty IPAddress)}; if($ip){$ip}else{'127.0.0.1'}"`) do set "LAN_IP=%%I"
-set "APP_URL=http://%LAN_IP%:3000/"
+if not defined PORT set "PORT=3000"
+set "APP_URL=http://127.0.0.1:%PORT%/"
+set "LAN_URL=http://%LAN_IP%:%PORT%/"
 
 echo Starting ComfyUI-API-Modelscope...
-echo Visit: %APP_URL%
-echo Local: http://127.0.0.1:3000/
+echo Local: %APP_URL%
+echo LAN:   %LAN_URL%
 echo Press Ctrl+C to stop.
 echo.
 
-start /b cmd /c "timeout /t 3 /nobreak >nul && start %APP_URL%"
+start "" /b powershell -NoProfile -Command "$deadline=(Get-Date).AddSeconds(30); while((Get-Date) -lt $deadline) { try { Invoke-WebRequest -UseBasicParsing -Uri $env:APP_URL -TimeoutSec 2 -ErrorAction Stop | Out-Null; Start-Process $env:APP_URL; exit } catch { Start-Sleep -Milliseconds 500 } }"
 "%PYEXE%" main.py
 
 echo.

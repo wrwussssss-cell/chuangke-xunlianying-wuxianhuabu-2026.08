@@ -11,6 +11,7 @@ function escapeAttr(str){ return escapeHtml(str); }
 function L(zh, en){ return langIsEn() ? en : zh; }
 function compactLabel(fullZh, compactZh, en){ return window.innerWidth <= 760 ? L(compactZh, en) : L(fullZh, en); }
 const CANVAS_LIST_PROJECT_KEY = 'canvasListCurrentProjectId';
+const CANVAS_LIST_ASSET_VERSION = new URLSearchParams(new URL(document.currentScript.src).search).get('v');
 
 function rememberedProjectId(){
     try {
@@ -466,9 +467,9 @@ function openCanvas(c){
     const enc = encodeURIComponent(c.id);
     const project = encodeURIComponent(c.project || currentProjectId || 'default');
     rememberProjectId(c.project || currentProjectId || 'default');
-    window.location.href = (c.kind === 'smart')
-        ? `/static/smart-canvas.html?id=${enc}&project=${project}&v=2026.07.03.4`
-        : `/static/canvas.html?id=${enc}&project=${project}&v=2026.07.03.4`;
+    const page = c.kind === 'smart' ? 'smart-canvas.html' : 'canvas.html';
+    const version = encodeURIComponent(CANVAS_LIST_ASSET_VERSION || '');
+    window.location.href = `/static/${page}?id=${enc}&project=${project}&v=${version}`;
 }
 
 /* ===== Card create flow ===== */

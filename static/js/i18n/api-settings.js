@@ -165,6 +165,7 @@
         "api.recommendGroupFree": { zh: "免费", en: "Free" },
         "api.recommendApimartSummary": { zh: "聚合多类型生成模型，适合希望用一套配置快速接入图像、视频和 LLM 的用户。", en: "Aggregates multiple generation model types for quickly connecting image, video, and LLM workflows with one setup." },
         "api.recommendT8Summary": { zh: "T8 API 接口入口，支持 Seedance 等模型，可使用邀请链接注册并获取 API Key。", en: "T8 API access for Seedance and other models. Use the invitation link to register and get an API key." },
+        "api.recommendTrainingCampSummary": { zh: "选中此端口即可使用训练营共享额度，支持文生图和图生图，分辨率为 1K。", en: "Use the training camp’s shared quota for text-to-image and image-to-image at 1K." },
         "api.recommendKieSummary": { zh: "Kie.ai 提供 GPT Image 图像生成和图生图接口，支持异步任务与参考图上传。", en: "Kie.ai provides GPT Image generation and image-to-image APIs with asynchronous tasks and reference image upload." },
         "api.tagImageToImage": { zh: "图生图", en: "Image-to-image" },
         "api.recommendAutodlSummary": { zh: "AutoDL GPU 云平台入口，用于租用 GPU、部署模型和运行 AI 工作负载。", en: "AutoDL GPU cloud entry for renting GPUs, deploying models, and running AI workloads." },

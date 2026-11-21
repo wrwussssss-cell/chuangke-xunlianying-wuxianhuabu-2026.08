@@ -2604,6 +2604,7 @@ function sanitizeSmartApiSelection(target=settings){
     }
     if((target.engine || 'api') === 'api' && (target.apiKind || 'image') !== 'video'){
         const allowAuto = isGptImageAutoSizeModel(target.model);
+        if(isTrainingCampApiImage(target)) target.resolution = '1k';
         if(!target.resolution) target.resolution = allowAuto ? defaultSmartApiResolution(target.model) : '1k';
         if(!allowAuto && target.resolution === 'auto') target.resolution = '1k';
     }
@@ -2767,10 +2768,21 @@ function apiImageSize(ratioValue, resolutionValue, customRatioValue='', customSi
     const ratioKey = ratioValue && SIZE_MAP[ratioValue] ? ratioValue : 'square';
     return SIZE_MAP[ratioKey]?.[resolutionKey] || SIZE_MAP.square[resolutionKey] || SIZE_MAP.square['1k'];
 }
+function isTrainingCampApiImage(sourceSettings=settings){
+    return (sourceSettings.engine || 'api') === 'api' && sourceSettings.apiKind !== 'video'
+        && sourceSettings.provider_id === 'kie-training-camp';
+}
+function smartResolutionOptions(prefix, includeCustom=true){
+    if(!prefix && isTrainingCampApiImage()) return ['1k'];
+    const options = !prefix && settings.engine === 'api' ? ['auto','1k','2k','4k'] : ['1k','2k','4k'];
+    if(includeCustom) options.push('custom');
+    return options;
+}
 function normalizeApiSizeSettings(prefix=''){
     const ratioKey = prefix ? `${prefix}Ratio` : 'ratio';
     const resKey = prefix ? `${prefix}Resolution` : 'resolution';
     const allowAuto = !prefix && settings.engine === 'api' && settings.apiKind !== 'video' && isGptImageAutoSizeModel(settings.model);
+    if(!prefix && isTrainingCampApiImage()) settings[resKey] = '1k';
     if(!settings[resKey]) settings[resKey] = allowAuto ? defaultSmartApiResolution(settings.model) : '1k';
     if(!allowAuto && settings[resKey] === 'auto') settings[resKey] = '1k';
     if(settings[resKey] === 'auto' && !settings[ratioKey]) settings[ratioKey] = 'square';
@@ -3150,7 +3162,7 @@ function renderSizeControls(prefix='', includeSource=false){
         ...(includeSource ? [['source', tr('canvas.adaptiveRatio') || '适配比例']] : []),
         ['custom', tr('canvas.custom') || '自定义']
     ];
-    const resolutionOptions = (!prefix && settings.engine === 'api') ? ['auto','1k','2k','4k','custom'] : ['1k','2k','4k','custom'];
+    const resolutionOptions = smartResolutionOptions(prefix);
     return `<select data-param="${resKey}">
             ${resolutionOptions.map(v => optionHtml(v, v === 'auto' ? '自动' : (v === 'custom' ? (tr('canvas.custom') || '自定义') : v.toUpperCase()), settings[resKey] || (prefix ? '1k' : defaultSmartApiResolution(settings.model)))).join('')}
         </select>
@@ -3308,7 +3320,7 @@ function renderRatioControl(prefix='', includeSource=false){
 }
 function renderResolutionControl(prefix=''){
     const resKey = prefix ? `${prefix}Resolution` : 'resolution';
-    const options = (!prefix && settings.engine === 'api') ? ['auto','1k','2k','4k','custom'] : ['1k','2k','4k','custom'];
+    const options = smartResolutionOptions(prefix);
     const current = settings[resKey] || ((!prefix && settings.engine === 'api') ? defaultSmartApiResolution(settings.model) : '1k');
     const allowAuto = !prefix && settings.engine === 'api' && settings.apiKind !== 'video' && isGptImageAutoSizeModel(settings.model);
     return `<div class="smart-control resolution-control">
@@ -3353,12 +3365,13 @@ function renderSizePickerControl(prefix='', includeSource=false){
     const resKey = prefix ? `${prefix}Resolution` : 'resolution';
     const customRatioKey = prefix ? `${prefix}CustomRatio` : 'customRatio';
     if(settings[ratioKey] === 'source') applySourceRatioToSettings(prefix);
-    const scope = sizePickerScope(prefix);
-    const options = (!prefix && settings.engine === 'api') ? ['auto','1k','2k','4k'] : ['1k','2k','4k'];
+    const fixedResolution = !prefix && isTrainingCampApiImage();
+    const scope = fixedResolution ? 'preset' : sizePickerScope(prefix);
+    const options = smartResolutionOptions(prefix, false);
     const currentRes = settings[resKey] || ((!prefix && settings.engine === 'api') ? defaultSmartApiResolution(settings.model) : '1k');
     const currentRatio = settings[ratioKey] || 'square';
     const currentCustomRatio = settings[customRatioKey] || (currentRatio === 'source' ? sourceImageRatioLabel(prefix) : '');
-    const allowAuto = !prefix && settings.engine === 'api' && settings.apiKind !== 'video' && isGptImageAutoSizeModel(settings.model);
+    const allowAuto = !fixedResolution && !prefix && settings.engine === 'api' && settings.apiKind !== 'video' && isGptImageAutoSizeModel(settings.model);
     const ratios = [
         ['square','1:1','正方形'], ['portrait','2:3','竖图'], ['landscape','3:2','横图'], ['portrait43','3:4','竖图'], ['landscape43','4:3','横图'],
         ['story','9:16','竖屏'], ['wide','16:9','宽屏'], ['ultrawide','21:9','超宽'], ['ultratall','9:21','超竖'],
@@ -3374,7 +3387,7 @@ function renderSizePickerControl(prefix='', includeSource=false){
                 <div class="size-picker-scope">
                     <button type="button" class="${scope === 'auto' ? 'active' : ''}" data-size-scope="auto" data-size-prefix="${escapeHtml(prefix)}" ${allowAuto ? '' : 'disabled'}>自动</button>
                     <button type="button" class="${scope === 'preset' ? 'active' : ''}" data-size-scope="preset" data-size-prefix="${escapeHtml(prefix)}">系统参数</button>
-                    <button type="button" class="${scope === 'custom' ? 'active' : ''}" data-size-scope="custom" data-size-prefix="${escapeHtml(prefix)}">自定义</button>
+                    <button type="button" class="${scope === 'custom' ? 'active' : ''}" data-size-scope="custom" data-size-prefix="${escapeHtml(prefix)}" ${fixedResolution ? 'disabled' : ''}>自定义</button>
                 </div>
             </div>
             ${scope === 'auto' ? `<div class="size-picker-pane size-picker-auto"><div class="size-picker-note"><strong>自动尺寸</strong><span>使用模型默认尺寸，或由支持自动尺寸的模型自行决定。</span></div></div>` : ''}
@@ -13644,7 +13657,8 @@ function sizeForRun(sourceSettings=settings){
     const fallbackResolution = sourceSettings.engine === 'api' && isGptImageAutoSizeModel(sourceSettings.model)
         ? defaultSmartApiResolution(sourceSettings.model)
         : '1k';
-    return apiImageSize(sourceSettings.ratio || 'square', sourceSettings.resolution || fallbackResolution, sourceSettings.customRatio || '', sourceSettings.customSize || '') || '1024x1024';
+    const resolution = isTrainingCampApiImage(sourceSettings) ? '1k' : (sourceSettings.resolution || fallbackResolution);
+    return apiImageSize(sourceSettings.ratio || 'square', resolution, sourceSettings.customRatio || '', sourceSettings.customSize || '') || '1024x1024';
 }
 function expectedOutputSize(){
     if(settings.engine === 'comfy'){
@@ -16301,13 +16315,14 @@ function comfyFieldKind(field){
 async function runApiGeneration(prompt, refs, runSettings=settings){
     if(!runSettings.provider_id || !runSettings.model) throw new Error(tr('smart.errNoApiModel'));
     const count = Math.max(1, Math.min(8, Number(runSettings.count || 1)));
+    const resolution = isTrainingCampApiImage(runSettings) ? '1k' : runSettings.resolution;
     const payload = {
         prompt,
         provider_id:runSettings.provider_id,
         model:runSettings.model,
         size:sizeForRun(runSettings),
         aspect_ratio:API_RATIO_VALUES[runSettings.ratio] || (runSettings.ratio === 'custom' ? String(runSettings.customRatio || '').trim() : ''),
-        resolution:['1k','2k','4k'].includes(runSettings.resolution) ? runSettings.resolution : '',
+        resolution:['1k','2k','4k'].includes(resolution) ? resolution : '',
         quality:runSettings.quality || 'auto',
         n:1,
         reference_images:imageRefsOnly(refs).slice(0, SMART_REFERENCE_IMAGE_MAX)

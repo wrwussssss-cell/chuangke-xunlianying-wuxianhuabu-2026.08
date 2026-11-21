@@ -29,6 +29,7 @@ import html
 import xml.etree.ElementTree as ET
 from contextvars import ContextVar
 from typing import List, Dict, Any, Optional, Tuple
+from concurrent.futures import ThreadPoolExecutor
 from threading import Lock, Thread
 import httpx
 from PIL import Image, ImageOps
@@ -83,6 +84,7 @@ CANVAS_USER_COOKIE = "infinite_canvas_user_id"
 
 AUTH_USER_CONTEXT = ContextVar("auth_user_id", default="")
 AUTH_COOKIE = "infinite_canvas_auth"
+AUTH_LOCAL_USERNAME = "local-owner"
 AUTH_PUBLIC_PATHS = {"/", "/auth.html", "/api/auth/status", "/api/auth/register", "/api/auth/login", "/api/auth/logout", "/favicon.ico"}
 
 def secrets_token():
@@ -101,13 +103,19 @@ def _auth_secret():
     with open(secret_path, "r", encoding="utf-8") as f:
         return f.read().strip()
 
-def load_auth_users():
+def load_auth_users(*, strict=False):
     users_path, _ = _auth_file_paths()
     try:
         with open(users_path, "r", encoding="utf-8-sig") as f:
             data = json.load(f)
-        return data if isinstance(data, dict) else {}
+        if not isinstance(data, dict):
+            raise ValueError("Invalid auth user store")
+        return data
+    except FileNotFoundError:
+        return {}
     except Exception:
+        if strict:
+            raise
         return {}
 
 def save_auth_users(users):
@@ -117,6 +125,10 @@ def save_auth_users(users):
     with open(temp_path, "w", encoding="utf-8") as f:
         json.dump(users, f, ensure_ascii=False, indent=2)
     os.replace(temp_path, users_path)
+
+def password_only_auth(users):
+    local_user = users.get(AUTH_LOCAL_USERNAME)
+    return len(users) == 1 and isinstance(local_user, dict) and local_user.get("password_only") is True
 
 def auth_username(value):
     return re.sub(r"[^a-zA-Z0-9_-]", "", str(value or "").strip())[:32]
@@ -168,7 +180,10 @@ async def set_canvas_user_context(request: Request, call_next):
             if path.startswith("/api/") or path.startswith("/output/") or path.startswith("/assets/"):
                 return auth_json_error("请先登录")
             return Response(content=static_html_response("auth.html").body, media_type="text/html", status_code=401)
-        return await call_next(request)
+        response = await call_next(request)
+        if path.startswith("/static/") and path.lower().endswith(".html"):
+            response.headers["Cache-Control"] = "no-cache"
+        return response
     finally:
         CANVAS_USER_CONTEXT.reset(canvas_token)
         AUTH_USER_CONTEXT.reset(auth_token)
@@ -266,14 +281,14 @@ GITHUB_VERSION_URL = "https://raw.githubusercontent.com/wrwussssss-cell/chuangke
 GITHUB_TREE_URL = "https://api.github.com/repos/wrwussssss-cell/chuangke-xunlianying-wuxianhuabu-2026.08/git/trees/main?recursive=1"
 GITHUB_RAW_ROOT = "https://raw.githubusercontent.com/wrwussssss-cell/chuangke-xunlianying-wuxianhuabu-2026.08/main"
 GITHUB_UPDATE_NOTES_URL = GITHUB_RAW_ROOT + "/static/update-notes.json"
-MODELSCOPE_REPO_URL = "https://www.modelscope.cn/studios/wrwusssss/11chuangkexunlianying-wuxianhuabu"
-MODELSCOPE_RAW_ROOT = "https://www.modelscope.cn/studios/wrwusssss/11chuangkexunlianying-wuxianhuabu/raw/master"
+MODELSCOPE_REPO_URL = "https://www.modelscope.cn/studios/wrwussssss/11chuangkexunlianying-wuxianhuabu"
+MODELSCOPE_RAW_ROOT = "https://www.modelscope.cn/studios/wrwussssss/11chuangkexunlianying-wuxianhuabu/raw/master"
 # ModelScope 仓库默认分支为 master；raw 网页路径会返回 HTML，必须用仓库文件 API 才能拿到纯文本
 # 注意：.ai 站命名空间为小写 daniel8152，API 路径大小写敏感（推送/文件 API 用大写会 404/拒绝）
-MODELSCOPE_FILE_API_ROOT = "https://www.modelscope.cn/api/v1/studio/wrwusssss/11chuangkexunlianying-wuxianhuabu/repo?Revision=master&FilePath="
+MODELSCOPE_FILE_API_ROOT = "https://www.modelscope.cn/api/v1/studio/wrwussssss/11chuangkexunlianying-wuxianhuabu/repo?Revision=master&FilePath="
 MODELSCOPE_VERSION_URL = MODELSCOPE_FILE_API_ROOT + "VERSION"
 MODELSCOPE_UPDATE_NOTES_URL = MODELSCOPE_FILE_API_ROOT + "static/update-notes.json"
-MODELSCOPE_TREE_URL = "https://www.modelscope.cn/api/v1/studio/wrwusssss/11chuangkexunlianying-wuxianhuabu/repo/files?Revision=master&Recursive=true"
+MODELSCOPE_TREE_URL = "https://www.modelscope.cn/api/v1/studio/wrwussssss/11chuangkexunlianying-wuxianhuabu/repo/files?Revision=master&Recursive=true"
 
 def ensure_release_icon() -> bool:
     """为旧发布包补回快捷方式所需的图标文件。"""
@@ -351,6 +366,8 @@ RUNTIME_DIR = os.path.abspath(os.getenv("INFINITE_CANVAS_RUNTIME_DIR", BASE_DIR)
 WORKFLOW_DIR = os.path.join(BASE_DIR, "workflows")
 WORKFLOW_PATH = os.path.join(WORKFLOW_DIR, "Z-Image.json")
 STATIC_DIR = os.path.join(BASE_DIR, "static")
+TRAINING_CAMP_KIE_ID = "kie-training-camp"
+TRAINING_CAMP_KIE_PUBLIC_KEY_PATH = os.path.join(STATIC_DIR, "training-camp-kie-key.txt")
 STATIC_RUNNINGHUB_DIR = os.path.join(STATIC_DIR, "runninghub")
 STATIC_RUNNINGHUB_THUMBNAIL_DIR = os.path.join(STATIC_RUNNINGHUB_DIR, "thumbnails")
 STATIC_RUNNINGHUB_API_PROVIDERS_FILE = os.path.join(STATIC_RUNNINGHUB_DIR, "api_providers.json")
@@ -878,6 +895,14 @@ def read_api_env_value(key: str) -> str:
         return ""
     return ""
 
+def training_camp_kie_public_key() -> str:
+    try:
+        with open(TRAINING_CAMP_KIE_PUBLIC_KEY_PATH, "r", encoding="utf-8-sig") as f:
+            key = f.read(1024).strip()
+    except (OSError, UnicodeError):
+        return ""
+    return key if re.fullmatch(r"[!-~]{12,512}", key) else ""
+
 def provider_env_key_value(provider_id: str) -> str:
     provider_id = str(provider_id or "").strip().lower()
     env_key = provider_key_env(provider_id)
@@ -886,6 +911,8 @@ def provider_env_key_value(provider_id: str) -> str:
         return key
     if provider_id == "modelscope":
         return MODELSCOPE_API_KEY or ""
+    if provider_id == TRAINING_CAMP_KIE_ID:
+        return training_camp_kie_public_key()
     return ""
 
 def runninghub_wallet_key_value() -> str:
@@ -1017,6 +1044,20 @@ def merge_default_api_providers(providers, inject_missing=True):
             current_kie["image_models"] = KIE_DEFAULT_IMAGE_MODELS[:]
             current_kie["model_names"] = {**KIE_MODEL_LABELS, **(current_kie.get("model_names") or {})}
             current_kie["kie_defaults_version"] = KIE_DEFAULTS_VERSION
+    if kie_default and training_camp_kie_public_key():
+        training_camp = next((item for item in merged if item.get("id") == TRAINING_CAMP_KIE_ID), None)
+        if training_camp is None:
+            training_camp = {
+                **kie_default,
+                "id": TRAINING_CAMP_KIE_ID,
+                "name": "训练营内部端口",
+                "image_models": KIE_DEFAULT_IMAGE_MODELS[:],
+                "model_names": dict(KIE_MODEL_LABELS),
+            }
+            merged.insert(merged.index(current_kie) + 1, training_camp)
+        training_camp["base_url"] = kie_default["base_url"]
+        training_camp["protocol"] = kie_default["protocol"]
+        training_camp["image_request_mode"] = kie_default["image_request_mode"]
     # 强制保留独立入口平台（不再强制 comfly）
     ms_default = next((d for d in default_api_providers() if d["id"] == "modelscope"), None)
     if ms_default:
@@ -2180,7 +2221,7 @@ def check_update():
     # 并发检测两个源，避免串行 8s+8s 拖慢首屏更新提示
     holder: Dict[str, Dict[str, Any]] = {}
     def _probe(key: str, url: str):
-        item = fetch_remote_version(url, timeout=5.0)
+        item = fetch_remote_version(url, timeout=12.0 if key == "modelscope" else 5.0)
         item["source"] = key
         holder[key] = item
     threads = [
@@ -2190,11 +2231,11 @@ def check_update():
     for t in threads:
         t.start()
     for t in threads:
-        t.join(timeout=5.5)
+        t.join(timeout=12.5 if t is threads[1] else 5.5)
     github = holder.get("github") or {"version": "", "ok": False, "error": "检测超时（超过 5s）", "url": GITHUB_VERSION_URL, "source": "github"}
-    modelscope = holder.get("modelscope") or {"version": "", "ok": False, "error": "检测超时（超过 5s）", "url": MODELSCOPE_VERSION_URL, "source": "modelscope"}
+    modelscope = holder.get("modelscope") or {"version": "", "ok": False, "error": "检测超时（超过 12s）", "url": MODELSCOPE_VERSION_URL, "source": "modelscope"}
     best: Dict[str, Any] = {}
-    for item in (github, modelscope):
+    for item in (modelscope, github):
         if item["ok"] and item["version"]:
             if not best or version_gt(item["version"], best["version"]):
                 best = {"source": item["source"], "version": item["version"]}
@@ -2318,9 +2359,20 @@ def download_github_update_files(files: List[str], staging_root: str) -> None:
         with open(stage_path, "wb") as f:
             f.write(data)
 
+def modelscope_update_get(url: str, timeout: int) -> requests.Response:
+    for attempt in range(3):
+        try:
+            return github_get(url, headers={"User-Agent": "Infinite-Canvas-Updater"}, timeout=timeout)
+        except urllib.error.URLError as exc:
+            if isinstance(exc, urllib.error.HTTPError) and exc.code not in {408, 429, 500, 502, 503, 504}:
+                raise
+            if attempt == 2:
+                raise
+            time.sleep(0.5 * (attempt + 1))
+
 def modelscope_update_file_list() -> List[str]:
     """通过 ModelScope 仓库文件 API 列出所有允许更新的文件（不依赖 git）。"""
-    resp = github_get(MODELSCOPE_TREE_URL, headers={"User-Agent": "Infinite-Canvas-Updater"}, timeout=30)
+    resp = modelscope_update_get(MODELSCOPE_TREE_URL, timeout=30)
     payload = json.loads(resp.content.decode("utf-8", errors="replace"))
     files_node = ((payload.get("Data") or {}).get("Files")) or []
     out: List[str] = []
@@ -2336,7 +2388,7 @@ def modelscope_update_file_list() -> List[str]:
 
 def modelscope_file_bytes(rel: str) -> bytes:
     url = MODELSCOPE_FILE_API_ROOT + urllib.parse.quote(rel, safe="/")
-    resp = github_get(url, headers={"User-Agent": "Infinite-Canvas-Updater"}, timeout=60)
+    resp = modelscope_update_get(url, timeout=30)
     return resp.content
 
 def download_modelscope_update_files(staging_root: str) -> List[str]:
@@ -2350,7 +2402,8 @@ def download_modelscope_update_files(staging_root: str) -> List[str]:
     if not any(f.startswith("static/") for f in files):
         raise RuntimeError("ModelScope 未返回 static 文件，已取消更新")
     staging_root_abs = os.path.abspath(staging_root)
-    for rel in files:
+
+    def download_file(rel):
         safe_update_target(rel)
         data = modelscope_file_bytes(rel)
         stage_path = os.path.abspath(os.path.join(staging_root_abs, *rel.split("/")))
@@ -2359,6 +2412,9 @@ def download_modelscope_update_files(staging_root: str) -> List[str]:
         os.makedirs(os.path.dirname(stage_path), exist_ok=True)
         with open(stage_path, "wb") as f:
             f.write(data)
+
+    with ThreadPoolExecutor(max_workers=8) as downloads:
+        list(downloads.map(download_file, files))
     return files
 
 def safe_update_target(path: str) -> str:
@@ -5225,10 +5281,13 @@ async def generate_kie_provider_image(prompt, size, quality, model, reference_im
     refs = [ref for ref in (reference_images or []) if ref.get("url")]
     requested_model = kie_model_for_request(model, bool(refs))
     base_url = (provider.get("base_url") or "https://api.kie.ai").rstrip("/")
+    requested_resolution = str(resolution or "").strip().upper() or "1K"
+    if provider["id"] == TRAINING_CAMP_KIE_ID:
+        requested_resolution = "1K"
     input_data = {
         "prompt": str(prompt or ""),
         "aspect_ratio": aspect_ratio or runninghub_aspect_from_size(size, "1:1"),
-        "resolution": str(resolution or "1K").upper() if str(resolution or "").strip() else "1K",
+        "resolution": requested_resolution,
         "background": "auto",
     }
     async with httpx.AsyncClient(timeout=httpx.Timeout(connect=30.0, read=1800.0, write=180.0, pool=20.0)) as client:
@@ -12183,7 +12242,12 @@ async def build_chat_text_reply(payload, conversation):
 async def auth_status(request: Request):
     users = load_auth_users()
     username = auth_user_from_token(request.cookies.get(AUTH_COOKIE, ""))
-    return {"authenticated": bool(username), "username": username, "has_users": bool(users)}
+    return {
+        "authenticated": bool(username),
+        "username": username,
+        "has_users": bool(users),
+        "password_only": password_only_auth(users),
+    }
 
 @app.post("/api/auth/register")
 async def auth_register(request: Request):
@@ -12191,7 +12255,10 @@ async def auth_register(request: Request):
         payload = await request.json()
     except Exception:
         raise HTTPException(status_code=400, detail="注册信息格式错误")
-    username = auth_username(payload.get("username"))
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=400, detail="注册信息格式错误")
+    password_only = payload.get("username") in (None, "")
+    username = AUTH_LOCAL_USERNAME if password_only else auth_username(payload.get("username"))
     password = str(payload.get("password") or "")
     confirm = str(payload.get("confirm_password") or payload.get("confirmPassword") or "")
     if len(username) < 3:
@@ -12200,11 +12267,19 @@ async def auth_register(request: Request):
         raise HTTPException(status_code=400, detail="密码至少 6 位")
     if password != confirm:
         raise HTTPException(status_code=400, detail="两次输入的密码不一致")
-    users = load_auth_users()
+    try:
+        users = load_auth_users(strict=True)
+    except (OSError, ValueError):
+        raise HTTPException(status_code=500, detail="无法读取账号数据")
+    if (password_only and users) or password_only_auth(users):
+        raise HTTPException(status_code=409, detail="密码已设置，请登录")
     if username in users:
         raise HTTPException(status_code=409, detail="用户名已经存在")
     salt, digest = password_hash(password)
-    users[username] = {"salt": salt, "password_hash": digest, "created_at": now_ms()}
+    user = {"salt": salt, "password_hash": digest, "created_at": now_ms()}
+    if password_only:
+        user["password_only"] = True
+    users[username] = user
     save_auth_users(users)
     response = JSONResponse({"ok": True, "username": username})
     response.set_cookie(AUTH_COOKIE, make_auth_token(username), max_age=60 * 60 * 24 * 14, httponly=True, samesite="lax")
@@ -12216,11 +12291,18 @@ async def auth_login(request: Request):
         payload = await request.json()
     except Exception:
         raise HTTPException(status_code=400, detail="登录信息格式错误")
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=400, detail="登录信息格式错误")
+    users = load_auth_users()
+    password_only = password_only_auth(users)
     username = auth_username(payload.get("username"))
+    if password_only and not payload.get("username"):
+        username = AUTH_LOCAL_USERNAME
     password = str(payload.get("password") or "")
-    user = load_auth_users().get(username)
+    user = users.get(username)
     if not user or not verify_password(password, user.get("salt"), user.get("password_hash")):
-        raise HTTPException(status_code=401, detail="用户名或密码错误")
+        message = "密码错误" if password_only else "用户名或密码错误"
+        raise HTTPException(status_code=401, detail=message)
     response = JSONResponse({"ok": True, "username": username})
     response.set_cookie(AUTH_COOKIE, make_auth_token(username), max_age=60 * 60 * 24 * 14, httponly=True, samesite="lax")
     return response

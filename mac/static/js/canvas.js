@@ -825,11 +825,11 @@ function isGptImageAutoSizeModel(model){
 function defaultApiImageResolution(model){
     return isGptImageAutoSizeModel(resolveImageModel(model)) ? '4k' : '1k';
 }
-function isVipGptProvider(providerId){
-    return String(providerId || '').trim().toLowerCase() === 'vip-gpt';
+function isOneKOnlyImageProvider(providerId){
+    return ['vip-gpt', 'kie-training-camp'].includes(String(providerId || '').trim().toLowerCase());
 }
 function apiResolutionOptions(providerId){
-    if(isVipGptProvider(providerId)) return '<option value="1k">1K</option>';
+    if(isOneKOnlyImageProvider(providerId)) return '<option value="1k">1K</option>';
     return '<option value="auto">自动</option><option value="1k">1K</option><option value="2k">2K</option><option value="4k">4K</option><option value="custom">'+tr('canvas.custom')+'</option>';
 }
 function normalizedImageQuality(value){
@@ -1042,7 +1042,7 @@ function exceedsFourKStandard(width, height){
 }
 function normalizeApiNodeSizeChoice(node){
     if(!node) return;
-    if(isVipGptProvider(node.apiProvider)){
+    if(isOneKOnlyImageProvider(node.apiProvider)){
         node.resolution = '1k';
         node.customSize = '';
         node.customWidth = '';
@@ -8492,6 +8492,7 @@ function renderGeneratorBody(node){
     const syncSizeControls = () => {
         normalizeApiNodeSizeChoice(node);
         resolutionSelect.innerHTML = apiResolutionOptions(node.apiProvider);
+        resolutionSelect.disabled = resolutionSelect.options.length === 1;
         const autoOption = resolutionSelect.querySelector('option[value="auto"]');
         if(autoOption) autoOption.disabled = !isGptImageAutoSizeModel(resolveImageModel(node.model));
         const squareOption = ratioSelect.querySelector('option[value="square"]');

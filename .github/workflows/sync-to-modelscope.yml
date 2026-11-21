@@ -35,6 +35,7 @@ jobs:
           rsync -a --delete \
             --exclude='.git/' \
             --exclude='.github/' \
+            --exclude='/static/training-camp-kie-key.txt' \
             --exclude='python/' \
             --exclude='mac/python-mac/' \
             --exclude='data/canvases/' \
@@ -50,9 +51,6 @@ jobs:
           git init -b master
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add --all
-          git commit -m "Sync source from GitHub ${GITHUB_SHA}"
-
           cat > "$RUNNER_TEMP/modelscope-askpass.sh" <<'EOF'
           #!/bin/sh
           case "$1" in
@@ -66,6 +64,24 @@ jobs:
           GIT_ASKPASS="$RUNNER_TEMP/modelscope-askpass.sh" \
           GIT_TERMINAL_PROMPT=0 \
           git fetch modelscope master
+
+          # This credential is explicitly public on ModelScope only. Preserve it
+          # across deployments without copying local credentials or printing its value.
+          PUBLIC_KEY_PATH="static/training-camp-kie-key.txt"
+          if git cat-file -e "modelscope/master:$PUBLIC_KEY_PATH" 2>/dev/null; then
+            git show "modelscope/master:$PUBLIC_KEY_PATH" > "$PUBLIC_KEY_PATH"
+          fi
+
+          PUBLISHED_VERSION="$(git show modelscope/master:VERSION)"
+          RELEASE_VERSION="$(cat VERSION)"
+          if [ "$(printf '%s\n' "$PUBLISHED_VERSION" "$RELEASE_VERSION" | sort -V | tail -1)" != "$RELEASE_VERSION" ]; then
+            echo "The source version is older than the published ModelScope version."
+            exit 1
+          fi
+
+          git add --all
+          git commit -m "Sync source from GitHub ${GITHUB_SHA}"
+
           # Keep ModelScope's initial repository history while GitHub remains
           # the authoritative source tree for subsequent syncs.
           git merge --allow-unrelated-histories --no-edit -s ours modelscope/master
